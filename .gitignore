@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+build/
+app/.cxx/
+local.properties
+*.iml
+.idea/
+captures/
+# Local test media and results stay on this PC (copyrighted film, generated subtitles).
+test-media/
+test-results/private/
+# Copied from the root THIRD_PARTY_NOTICES.md at build time.
+app/src/main/assets/licenses/THIRD_PARTY_NOTICES.md
+# Built APKs (the deliverable copy in the folder root is not versioned).
+/*.apk
