@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import com.aivicventures.subtitletranslator.BuildConfig
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.asr.WhisperNative
+import com.aivicventures.subtitletranslator.audio.FfmpegAudio
 
 /** Version, privacy note and every third-party licence (assets/licenses). */
 class AboutActivity : ComponentActivity() {
@@ -16,6 +17,7 @@ class AboutActivity : ComponentActivity() {
         col.addFull(body(getString(R.string.about_text)))
         val cpu = runCatching { WhisperNative.ensureLoaded(this); WhisperNative.systemInfo() }.getOrElse { it.message ?: "" }
         col.addFull(body(getString(R.string.about_cpu, cpu)))
+        col.addFull(body(FfmpegAudio.description?.let { getString(R.string.about_ffmpeg, it) } ?: getString(R.string.about_ffmpeg_none)))
         col.addFull(heading(getString(R.string.licences)))
         val files = assets.list("licenses").orEmpty().sorted().sortedBy { if (it.startsWith("THIRD_PARTY")) 0 else 1 }
         for (f in files) {

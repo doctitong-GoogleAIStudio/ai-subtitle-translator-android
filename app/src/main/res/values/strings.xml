@@ -37,12 +37,23 @@
     <string name="setting_language_help">Automatic detection works for most films; pick the language if it is misdetected (for example Bengali).</string>
     <string name="setting_threads">Processing threads</string>
     <string name="setting_threads_value">%1$d of %2$d CPU cores</string>
+    <string name="setting_fast_cores">Use only the fast CPU cores (%1$d of %2$d)</string>
+    <string name="setting_fast_cores_help">Keeps recognition off the slow power-saving cores, which would otherwise hold the fast ones back.</string>
+    <string name="setting_fast_cores_uniform">All cores of this phone run at the same speed, so no core is left out.</string>
+    <string name="setting_battery_saver">Battery saver</string>
+    <string name="setting_battery_saver_help" formatted="false">Half the threads, faster translation settings and no background work beyond the look-ahead. This also turns on by itself when the system Power Saver is on, the battery is at 15 % or less and not charging, or the phone is hot.</string>
+    <string name="status_saving">saving power: %1$s</string>
+    <string name="audio_track">Audio</string>
+    <string name="audio_track_title">Audio track for playback and subtitles</string>
+    <string name="audio_track_unsupported">(no decoder on this phone)</string>
     <string name="setting_size">Subtitle size</string>
     <string name="setting_size_value">%1$d sp</string>
     <string name="setting_pause_low">Pause playback while subtitles are not ready</string>
     <string name="setting_continue">Keep translating the whole movie in the background</string>
     <string name="about_text">Publisher: aivicventures. Everything runs on this device: audio is decoded from your video, recognised by Whisper (whisper.cpp) and translated to English, and the results are cached so a movie is never processed twice. Nothing is uploaded. Downloads happen only in the Model Manager.</string>
     <string name="about_cpu">Speech engine: %1$s</string>
+    <string name="about_ffmpeg">Extra audio decoders (AC-3, E-AC-3, DTS, TrueHD): FFmpeg %1$s, used only when the phone has no decoder of its own. These libraries are replaceable; see the FFmpeg section of the notices below.</string>
+    <string name="about_ffmpeg_none">Extra audio decoders: not included in this build, so AC-3 and DTS play only if the phone decodes them.</string>
     <string name="licences">Licences</string>
     <string name="loading_model">Loading %1$s…</string>
     <string name="gate_lookahead">Preparing subtitles: %1$.0f of %2$.0f s ready</string>

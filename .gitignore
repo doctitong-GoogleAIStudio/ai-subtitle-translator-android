@@ -13,3 +13,8 @@ test-results/private/
 app/src/main/assets/licenses/THIRD_PARTY_NOTICES.md
 # Built APKs (the deliverable copy in the folder root is not versioned).
 /*.apk
+# Optional FFmpeg build output (scripts/build_ffmpeg.sh); configuration-*.txt is versioned.
+app/src/main/ffmpeg/jniLibs/
+app/src/main/ffmpeg/include/
+# FFmpeg source tarball shared alongside the APK (LGPL); downloaded by scripts/build_ffmpeg.sh.
+/ffmpeg-*.tar.xz

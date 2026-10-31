@@ -5,8 +5,10 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <sched.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -268,6 +270,36 @@ Java_com_aivicventures_subtitletranslator_asr_WhisperNative_transcribe(
     jclass cls = env->FindClass("com/aivicventures/subtitletranslator/asr/NativeResult");
     jmethodID ctor = env->GetMethodID(cls, "<init>", "(Ljava/lang/String;[[B[J[J[F[F[I)V");
     return env->NewObject(cls, ctor, jlang, texts, jt0, jt1, jns, jlp, jnt);
+}
+
+// CPU affinity of the calling thread only (pid 0 = this thread on Linux). Threads it creates
+// afterwards inherit the mask, so pinning the engine thread pins whisper.cpp's workers too.
+JNIEXPORT jboolean JNICALL
+Java_com_aivicventures_subtitletranslator_asr_WhisperNative_setThreadAffinity(JNIEnv *env, jobject, jintArray cpus) {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    const jsize n = env->GetArrayLength(cpus);
+    std::vector<jint> ids(n);
+    env->GetIntArrayRegion(cpus, 0, n, ids.data());
+    for (jint id : ids) if (id >= 0 && id < CPU_SETSIZE) CPU_SET(id, &set);
+    if (sched_setaffinity(0, sizeof(set), &set) != 0) {
+        LOGW("sched_setaffinity failed: %s", strerror(errno));
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
+JNIEXPORT jintArray JNICALL
+Java_com_aivicventures_subtitletranslator_asr_WhisperNative_getThreadAffinity(JNIEnv *env, jobject) {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    std::vector<jint> ids;
+    if (sched_getaffinity(0, sizeof(set), &set) == 0) {
+        for (int i = 0; i < CPU_SETSIZE; i++) if (CPU_ISSET(i, &set)) ids.push_back(i);
+    }
+    jintArray out = env->NewIntArray(static_cast<jsize>(ids.size()));
+    env->SetIntArrayRegion(out, 0, static_cast<jsize>(ids.size()), ids.data());
+    return out;
 }
 
 }  // extern "C"

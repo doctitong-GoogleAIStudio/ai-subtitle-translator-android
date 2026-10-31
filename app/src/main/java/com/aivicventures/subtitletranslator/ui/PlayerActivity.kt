@@ -23,17 +23,26 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.ui.PlayerView
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.asr.WhisperAsr
 import com.aivicventures.subtitletranslator.translate.M2M100Translator
 import com.aivicventures.subtitletranslator.translate.TranslatorNative
+import com.aivicventures.subtitletranslator.audio.AudioTrackInfo
 import com.aivicventures.subtitletranslator.audio.AudioWindowReader
+import com.aivicventures.subtitletranslator.audio.FfmpegAudio
+import com.aivicventures.subtitletranslator.device.CpuTopology
+import com.aivicventures.subtitletranslator.device.PowerMonitor
 import com.aivicventures.subtitletranslator.audio.Fingerprint
 import com.aivicventures.subtitletranslator.audio.UnsupportedAudioException
 import com.aivicventures.subtitletranslator.buffering.BufferState
@@ -79,6 +88,10 @@ class PlayerActivity : ComponentActivity() {
     private var pausedForBuffer = false
     private var lastStatus: EngineStatus? = null
     private var controllerVisible = false
+    private lateinit var audioButton: Button
+    private var audioTracks: List<AudioTrackInfo> = emptyList()
+    private var audioOrdinal = 0
+    private var audioApplied = false
     private val settings by lazy { app.settings }
     private lateinit var mode: Mode
 
@@ -97,7 +110,17 @@ class PlayerActivity : ComponentActivity() {
         }
         buildViews()
 
-        player = ExoPlayer.Builder(this).build()
+        // Media3's FFmpeg extension plays what the phone cannot (AC-3, DTS, …); platform
+        // decoders still come first (EXTENSION_RENDERER_MODE_ON, not PREFER).
+        val renderers = DefaultRenderersFactory(this).setExtensionRendererMode(
+            if (FfmpegAudio.available) DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON else DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF,
+        )
+        player = ExoPlayer.Builder(this, renderers).build()
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                Log.i(TAG, "playback audio decoder $decoderName")
+            }
+        })
         playerView.player = player
         player.setMediaItem(MediaItem.fromUri(uri))
         player.playWhenReady = false
@@ -106,6 +129,8 @@ class PlayerActivity : ComponentActivity() {
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                 engine?.updatePlayhead(newPosition.positionMs / 1000.0, player.isPlaying)
             }
+
+            override fun onTracksChanged(tracks: Tracks) = applyAudioTrack()
         })
 
         movieName = MainActivity.displayName(this, uri)
@@ -144,6 +169,8 @@ class PlayerActivity : ComponentActivity() {
         }
         statusView = TextView(this).apply { setTextColor(Color.WHITE); textSize = 13f }
         topBar.addView(statusView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        audioButton = smallButton(getString(R.string.audio_track)) { chooseAudioTrack() }.apply { visibility = View.GONE }
+        topBar.addView(audioButton)
         topBar.addView(smallButton("−0.5 s") { nudgeDelay(-0.5f) })
         topBar.addView(smallButton("+0.5 s") { nudgeDelay(0.5f) })
         topBar.addView(smallButton(getString(R.string.export_srt)) { askExport() })
@@ -215,7 +242,12 @@ class PlayerActivity : ComponentActivity() {
                 val fp = Fingerprint.of(this@PlayerActivity, uri)
                 fingerprint = fp
                 if (intent.getBooleanExtra(EXTRA_CLEAR_CACHE, false)) app.db.clearMovie(fp)
-                val r = AudioWindowReader(this@PlayerActivity, uri)
+                val tracks = AudioWindowReader.tracks(this@PlayerActivity, uri)
+                val ordinal = intent.getIntExtra(EXTRA_AUDIO_TRACK, -1).takeIf { it in tracks.indices }
+                    ?: AudioTrackInfo.chooseDefault(tracks, settings.audioTrack(fp), language)
+                audioTracks = tracks
+                audioOrdinal = ordinal
+                val r = AudioWindowReader(this@PlayerActivity, uri, tracks.getOrNull(ordinal)?.index)
                 val duration = r.durationSec.takeIf { it > 0 } ?: error("Could not read the movie's duration.")
                 app.db.upsertMovie(fp, uri.toString(), movieName, duration)
                 val a = WhisperAsr(this@PlayerActivity, models.file(spec).path, models.file(vad).path, spec.id)
@@ -225,26 +257,35 @@ class PlayerActivity : ComponentActivity() {
                     "m2m100" -> true
                     else -> spec.autoMt
                 }
+                // Fast cores only: the engine thread is pinned (whisper.cpp's workers inherit it);
+                // CTranslate2 starts its workers while the translator is built, so pin that too.
+                val pins = intent.getStringExtra(EXTRA_PIN_CPUS)?.let { CpuTopology.parseCpuList(it) }
+                    ?: CpuTopology.fastCores.takeIf { settings.fastCoresOnly && CpuTopology.heterogeneous }
                 val mt = if (useMt && mtSpec != null && TranslatorNative.available) {
-                    runCatching { M2M100Translator(models.folder(mtSpec), settings.threads) }
+                    runCatching { CpuTopology.withPinned(pins) { M2M100Translator(models.folder(mtSpec), settings.threads) } }
                         .onFailure { Log.w(TAG, "M2M100 unavailable, Whisper translates", it) }
                         .getOrNull()
                 } else null
                 translator = mt
-                // Separate cache per pipeline: Whisper-translated lines are never mixed with M2M100 ones.
-                val task = if (mt != null) mtSpec!!.id else "translate"
+                // Separate cache per pipeline (Whisper-translated lines are never mixed with M2M100
+                // ones) and per audio track (a dub is a different text); the first track keeps
+                // the Phase 1 key so existing caches stay valid.
+                val task = (if (mt != null) mtSpec!!.id else "translate") + if (ordinal > 0) "@a$ordinal" else ""
                 val profile = app.db.profileId(fp, spec.id, task, language)
                 val pre = if (!intent.getBooleanExtra(EXTRA_PREFETCH, true)) null
                 else runCatching { AudioWindowReader(this@PlayerActivity, uri, r.track) }.getOrNull()
                 prefetchReader = pre
+                val power = PowerMonitor(this@PlayerActivity, intent.getBooleanExtra(EXTRA_BATTERY_SAVER, settings.batterySaver))
                 val eng = LookAheadEngine(r, pre, a, mt, app.db, profile, duration, mode, language, settings.threads, settings.continueWholeMovie,
-                    intent.getIntExtra(EXTRA_MT_BEAM, 0))
-                Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=${settings.threads} prefetch=${pre != null} audio=${r.mime} cached=${eng.subtitles().size}".format(duration))
+                    intent.getIntExtra(EXTRA_MT_BEAM, 0), power, pins)
+                Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=${settings.threads} prefetch=${pre != null} audio=${r.mime} decoder=${r.decoderName} track=${ordinal + 1}/${tracks.size} pin=${pins ?: "-"} cached=${eng.subtitles().size}".format(duration))
                 Triple(eng, r, a)
             }
             reader = r
             asr = a
             engine = eng
+            audioButton.visibility = if (audioTracks.size > 1) View.VISIBLE else View.GONE
+            applyAudioTrack()
             val resume = app.db.movie(fingerprint!!)?.lastPosition ?: 0.0
             if (resume > 5 && intent.getBooleanExtra(EXTRA_FROM_START, false).not()) {
                 player.seekTo((resume * 1000).toLong())
@@ -278,8 +319,9 @@ class PlayerActivity : ComponentActivity() {
         if (prev?.state != s.state) Log.i(TAG, "status ${s.state} reserve=%.1f/%.0f speed=%.2fx at %.1f".format(s.reserveSec, s.targetSec, s.speed, player.currentPosition / 1000.0))
         val lang = if (s.language.isNotEmpty()) " · ${Languages.name(s.language)}" else ""
         val speed = if (s.speed > 0) " · %.1f× real time".format(s.speed) else ""
+        val saving = if (s.saving.isNotEmpty()) " · " + getString(R.string.status_saving, s.saving) else ""
         val ahead = if (mode == Mode.FULL) "%.0f%% done".format(100 * s.coveredSec / s.durationSec.coerceAtLeast(1.0)) else "%.0f s ahead".format(s.reserveSec)
-        statusView.text = "${s.state.label} · $ahead$speed$lang" + if (s.message.isNotEmpty()) "\n${s.message}" else ""
+        statusView.text = "${s.state.label} · $ahead$speed$lang$saving" + if (s.message.isNotEmpty()) "\n${s.message}" else ""
         if (s.state == BufferState.ERROR) { showError(s.message); return }
         if (!controllerVisible) topBar.visibility = if (s.ready) View.GONE else View.VISIBLE
 
@@ -345,6 +387,37 @@ class PlayerActivity : ComponentActivity() {
             }
         }
         return null
+    }
+
+    /** Plays the audio track the subtitles are made from (Media3 lists audio groups in file order). */
+    private fun applyAudioTrack() {
+        if (audioApplied || audioTracks.size < 2) return
+        val groups = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        val group = groups.getOrNull(audioOrdinal) ?: return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
+            .build()
+        audioApplied = true
+        Log.i(TAG, "audio track ${audioOrdinal + 1} of ${groups.size} selected for playback (supported=${group.isTrackSupported(0)})")
+    }
+
+    /** Switching track restarts the screen: subtitles come from the new track (cached per track). */
+    private fun chooseAudioTrack() {
+        val fp = fingerprint ?: return
+        val labels = audioTracks.map { it.describe() + if (it.decodable) "" else " " + getString(R.string.audio_track_unsupported) }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.audio_track_title)
+            .setSingleChoiceItems(labels.toTypedArray(), audioOrdinal) { dialog, which ->
+                dialog.dismiss()
+                if (which == audioOrdinal) return@setSingleChoiceItems
+                settings.setAudioTrack(fp, which)
+                app.db.savePosition(fp, player.currentPosition / 1000.0)
+                // Test overrides must not undo the viewer's choice after the restart.
+                listOf(EXTRA_AUDIO_TRACK, EXTRA_FROM_START, EXTRA_CLEAR_CACHE).forEach { intent.removeExtra(it) }
+                recreate()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun nudgeDelay(d: Float) {
@@ -414,5 +487,10 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_TRANSLATOR = "translator"
         /** Test hook: M2M100 beam size (0 = chosen by mode). */
         const val EXTRA_MT_BEAM = "mt_beam"
+        /** Test hooks: audio track (0-based among audio tracks), CPU list to pin to ("0-1"),
+         *  and forcing the battery saver on. */
+        const val EXTRA_AUDIO_TRACK = "audio_track"
+        const val EXTRA_PIN_CPUS = "pin_cpus"
+        const val EXTRA_BATTERY_SAVER = "battery_saver"
     }
 }

@@ -6,6 +6,8 @@ import com.aivicventures.subtitletranslator.asr.Hallucination
 import com.aivicventures.subtitletranslator.asr.WhisperAsr
 import com.aivicventures.subtitletranslator.audio.AudioWindowReader
 import com.aivicventures.subtitletranslator.cache.CacheDb
+import com.aivicventures.subtitletranslator.device.CpuTopology
+import com.aivicventures.subtitletranslator.device.PowerMonitor
 import com.aivicventures.subtitletranslator.settings.Mode
 import com.aivicventures.subtitletranslator.subtitles.Subtitle
 import com.aivicventures.subtitletranslator.translate.M2M100Translator
@@ -14,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +54,8 @@ data class EngineStatus(
     val message: String = "",
     /** True once enough subtitles are ready to start playback (the readiness gate). */
     val ready: Boolean = false,
+    /** Why the engine is saving power ("" = full speed). */
+    val saving: String = "",
 )
 
 /**
@@ -80,8 +85,18 @@ class LookAheadEngine(
     private val continueWholeMovie: Boolean,
     /** M2M100 beam size; 0 = 4 in Full Movie mode, otherwise greedy (beam 4 scored no better on FLEURS at 1.6× the cost). */
     private val mtBeam: Int = 0,
+    /** Battery and heat; null = always full speed. */
+    private val power: PowerMonitor? = null,
+    /** CPU cores for the engine thread and the worker threads it starts; null = any core. */
+    private val pinCpus: List<Int>? = null,
 ) {
-    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "subtitle-engine").apply { priority = Thread.NORM_PRIORITY - 1 } }
+    private val worker = Executors.newSingleThreadExecutor { r ->
+        Thread({
+            if (pinCpus != null) Log.i(TAG, "engine thread pinned to cores $pinCpus: ${CpuTopology.pinCurrentThread(pinCpus)}")
+            r.run()
+        }, "subtitle-engine").apply { priority = Thread.NORM_PRIORITY - 1 }
+    }
+    @Volatile private var powerState = PowerMonitor.State(saving = false, critical = false, reason = "")
     private val scope = CoroutineScope(SupervisorJob() + worker.asCoroutineDispatcher())
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var loop: Job? = null
@@ -119,12 +134,15 @@ class LookAheadEngine(
             publish()
             while (isActive) {
                 if (paused) { waitForChange(); continue }
+                updatePower()
                 val job = synchronized(lock) { nextJob() }
                 if (job == null) {
                     publish()
                     waitForChange()
                     continue
                 }
+                // Very hot: give the phone time to cool between jobs (the viewer sees "delayed").
+                if (powerState.critical) delay(COOL_DOWN_MS)
                 runJob(job)
             }
         }
@@ -180,7 +198,7 @@ class LookAheadEngine(
         val ph = playhead
         var t = coverage.firstUncovered(ph)
         val reserve = t - ph
-        val background = mode == Mode.FULL || continueWholeMovie
+        val background = mode == Mode.FULL || (continueWholeMovie && !powerState.saving)
         if (t >= durationSec - 0.05) {
             if (!background) return null
             t = coverage.firstUncovered(0.0) // back-fill parts skipped by seeking
@@ -234,7 +252,7 @@ class LookAheadEngine(
         val t1 = System.nanoTime()
         prefetchNext(job)
         val result = try {
-            asr.run(audio, language, threads, mode.thorough && !job.hurry, translator?.let { { l: String -> M2M100Translator.supports(l) } })
+            asr.run(audio, language, powerState.threads(threads), mode.thorough && !job.hurry, translator?.let { { l: String -> M2M100Translator.supports(l) } })
         } catch (e: Throwable) {
             Log.e(TAG, "recognition failed", e)
             fail("Speech recognition failed: ${e.message}")
@@ -256,7 +274,7 @@ class LookAheadEngine(
             s >= job.start - 0.05 && s < job.end && !overlapsStored(s, min(winStart + seg.end, winEnd)) // owner-by-start
         }
         val t3 = System.nanoTime()
-        val english = translate(kept, if (mtBeam > 0) mtBeam else if (mode == Mode.FULL && !job.hurry) 4 else 1) ?: return
+        val english = translate(kept, if (mtBeam > 0) mtBeam else if (mode == Mode.FULL && !job.hurry && !powerState.saving) 4 else 1) ?: return
         val mtSec = (System.nanoTime() - t3) / 1e9
         val chunkSpeed = (job.end - job.start) / ((System.nanoTime() - t0) / 1e9).coerceAtLeast(0.01)
         speed = if (speed == 0.0) chunkSpeed else speed * 0.7 + chunkSpeed * 0.3
@@ -280,9 +298,9 @@ class LookAheadEngine(
         }
         Log.i(
             TAG,
-            "chunk %.1f-%.1f audio=%.1fs decode=%.2fs asr=%.2fs mt=%.2fs speed=%.2fx lang=%s kept=%d dropped=%d hurry=%b gen=%d/%d"
+            "chunk %.1f-%.1f audio=%.1fs decode=%.2fs asr=%.2fs mt=%.2fs speed=%.2fx lang=%s kept=%d dropped=%d hurry=%b gen=%d/%d threads=%d"
                 .format(job.start, job.end, winEnd - winStart, (t1 - t0) / 1e9, asrSec, mtSec, chunkSpeed, result.language,
-                    added.size, result.dropped, job.hurry, job.generation, generation),
+                    added.size, result.dropped, job.hurry, job.generation, generation, powerState.threads(threads)),
         )
         added.forEach { Log.i(TAG, "  %s → %s  %s".format(fmt(it.start), fmt(it.end), it.english)) }
         if (result.unsupportedLanguage != null) {
@@ -336,6 +354,15 @@ class LookAheadEngine(
         ov > 0.5 * min(e - s, o.end - o.start)
     }
 
+    private fun updatePower() {
+        val next = power?.state() ?: return
+        if (next != powerState) {
+            Log.i(TAG, "power: saving=${next.saving} critical=${next.critical} reason=${next.reason.ifEmpty { "-" }} threads=${next.threads(threads)}")
+            powerState = next
+            publish()
+        }
+    }
+
     private fun publish() {
         val (reserve, covered) = synchronized(lock) { coverage.reserve(playhead) to coverage.total() }
         val remaining = durationSec - playhead
@@ -354,7 +381,7 @@ class LookAheadEngine(
         _status.value = old.copy(
             state = if (old.state == BufferState.ERROR) old.state else state,
             reserveSec = reserve, targetSec = target, coveredSec = covered, durationSec = durationSec,
-            speed = speed, language = lastLanguage, ready = ready,
+            speed = speed, language = lastLanguage, ready = ready, saving = powerState.reason,
         )
     }
 
@@ -368,6 +395,7 @@ class LookAheadEngine(
         /** Audio decoded before / after each chunk, so words at the joins are heard whole. */
         const val LEAD = 1.0
         const val TAIL = 3.0
+        private const val COOL_DOWN_MS = 10_000L
 
         fun fmt(sec: Double): String {
             val s = sec.toInt()

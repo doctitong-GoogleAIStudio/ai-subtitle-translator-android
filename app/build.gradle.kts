@@ -48,6 +48,8 @@ android {
         jniLibs.useLegacyPackaging = true
     }
     buildFeatures { buildConfig = true }
+    // Optional LGPL FFmpeg shared libraries from scripts/build_ffmpeg.sh (git-ignored).
+    sourceSets.getByName("main").jniLibs.srcDir("src/main/ffmpeg/jniLibs")
 }
 
 // The About screen shows the same notices file as the repository root.
@@ -67,5 +69,7 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.media3.inspector)
+    // Nullness annotations used by the vendored Media3 FFmpeg extension (MIT; compile time only).
+    compileOnly("org.checkerframework:checker-qual:3.49.0")
     testImplementation(libs.junit)
 }

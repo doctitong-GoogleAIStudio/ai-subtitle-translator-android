@@ -72,6 +72,20 @@ class Settings(context: Context) {
         get() = prefs.getString("translator", "auto") ?: "auto"
         set(v) = prefs.edit().putString("translator", v).apply()
 
+    /** Run recognition on the phone's fast cores only (big.LITTLE phones). */
+    var fastCoresOnly: Boolean
+        get() = prefs.getBoolean("fast_cores_only", true)
+        set(v) = prefs.edit().putBoolean("fast_cores_only", v).apply()
+
+    /** Always work at reduced power (it also happens by itself when hot or low on battery). */
+    var batterySaver: Boolean
+        get() = prefs.getBoolean("battery_saver", false)
+        set(v) = prefs.edit().putBoolean("battery_saver", v).apply()
+
+    /** Audio track (0-based among the movie's audio tracks) chosen for a movie; null = not chosen. */
+    fun audioTrack(fingerprint: String): Int? = prefs.getInt("audio_track_$fingerprint", -1).takeIf { it >= 0 }
+    fun setAudioTrack(fingerprint: String, ordinal: Int) = prefs.edit().putInt("audio_track_$fingerprint", ordinal).apply()
+
     var subtitleSizeSp: Int
         get() = prefs.getInt("subtitle_size_sp", 20)
         set(v) = prefs.edit().putInt("subtitle_size_sp", v.coerceIn(12, 40)).apply()
@@ -82,7 +96,7 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putFloat("subtitle_delay", v).apply()
 
     companion object {
-        /** Four threads suit big.LITTLE phones (the big cores); fewer on small CPUs. */
-        fun defaultThreads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        /** One thread per fast core, at most four; fewer on small CPUs. */
+        fun defaultThreads(): Int = com.aivicventures.subtitletranslator.device.CpuTopology.recommendedThreads()
     }
 }

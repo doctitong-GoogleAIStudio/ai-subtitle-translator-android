@@ -41,6 +41,26 @@ add_library(subtrans_jni SHARED subtrans_jni.cpp)
 target_include_directories(subtrans_jni PRIVATE ${WHISPER_DIR}/include ${WHISPER_DIR}/ggml/include)
 target_link_libraries(subtrans_jni whisper ggml ggml-base log android)
 
+# Optional LGPL FFmpeg audio decoders (scripts/build_ffmpeg.sh): shared libraries packaged
+# from src/main/ffmpeg/jniLibs by Gradle, linked here by two small JNI libraries:
+# Media3's FFmpeg extension (playback) and subtrans_ff (decoding for recognition).
+set(FFMPEG_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../ffmpeg)
+if (EXISTS ${FFMPEG_DIR}/jniLibs/${ANDROID_ABI}/libavcodec.so)
+    foreach(lib avutil swresample avcodec)
+        add_library(ff_${lib} SHARED IMPORTED)
+        set_target_properties(ff_${lib} PROPERTIES IMPORTED_LOCATION ${FFMPEG_DIR}/jniLibs/${ANDROID_ABI}/lib${lib}.so)
+    endforeach()
+    add_library(ffmpegJNI SHARED media3_ffmpeg/ffmpeg_jni.cc)
+    target_include_directories(ffmpegJNI PRIVATE ${FFMPEG_DIR}/include/${ANDROID_ABI})
+    set_target_properties(ffmpegJNI PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    target_link_libraries(ffmpegJNI PRIVATE android ff_swresample ff_avcodec ff_avutil log)
+    add_library(subtrans_ff SHARED subtrans_ff.cpp)
+    target_include_directories(subtrans_ff PRIVATE ${FFMPEG_DIR}/include/${ANDROID_ABI})
+    target_link_libraries(subtrans_ff ff_avcodec ff_avutil log)
+else()
+    message(STATUS "FFmpeg not built for ${ANDROID_ABI}: no AC-3/DTS fallback decoder")
+endif()
+
 # Text translation (M2M100) with CTranslate2: Ruy is its only CPU backend here (int8 and
 # float GEMM), no MKL / OpenMP. Kept in its own JNI library so speech recognition still
 # works where it cannot load. CTranslate2's CPU kernels need a 64-bit ABI; 32-bit phones

@@ -11,6 +11,7 @@ import android.widget.Switch
 import androidx.activity.ComponentActivity
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
+import com.aivicventures.subtitletranslator.device.CpuTopology
 import com.aivicventures.subtitletranslator.settings.Languages
 import com.aivicventures.subtitletranslator.translate.TranslatorNative
 import com.aivicventures.subtitletranslator.settings.Mode
@@ -62,6 +63,20 @@ class SettingsActivity : ComponentActivity() {
                 override fun onStopTrackingTouch(sb: SeekBar) = Unit
             })
         })
+
+        col.addFull(Switch(this).apply {
+            text = getString(R.string.setting_fast_cores, CpuTopology.fastCores.size, CpuTopology.coreCount)
+            isChecked = s.fastCoresOnly
+            isEnabled = CpuTopology.heterogeneous
+            setOnCheckedChangeListener { _, v -> s.fastCoresOnly = v }
+        })
+        col.addFull(body(getString(if (CpuTopology.heterogeneous) R.string.setting_fast_cores_help else R.string.setting_fast_cores_uniform)))
+        col.addFull(Switch(this).apply {
+            text = getString(R.string.setting_battery_saver)
+            isChecked = s.batterySaver
+            setOnCheckedChangeListener { _, v -> s.batterySaver = v }
+        })
+        col.addFull(body(getString(R.string.setting_battery_saver_help)))
 
         col.addFull(heading(getString(R.string.setting_size)))
         val sizeLabel = body(getString(R.string.setting_size_value, s.subtitleSizeSp))

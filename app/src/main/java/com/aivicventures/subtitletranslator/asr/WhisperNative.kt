@@ -32,6 +32,9 @@ object WhisperNative {
     external fun freeContext(ptr: Long)
     external fun requestAbort(ptr: Long)
     external fun clearAbort(ptr: Long)
+    /** Pins the calling thread to these CPU ids (inherited by threads it starts later). */
+    external fun setThreadAffinity(cpus: IntArray): Boolean
+    external fun getThreadAffinity(): IntArray
     /** Speech regions as [t0, t1, t0, t1, …] in seconds; null if the VAD model cannot load. */
     external fun detectSpeech(ptr: Long, vadModel: String, samples: FloatArray): FloatArray?
     external fun transcribe(

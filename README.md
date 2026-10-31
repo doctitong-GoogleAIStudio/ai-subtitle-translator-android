@@ -4,17 +4,18 @@ Android version of the Windows app *Universal AI Movie Subtitle Translator*. It 
 own video files and shows English subtitles generated **on the phone**: Whisper speech
 recognition, translation to English (M2M100 418M or Whisper's own translate task, whichever
 measured better for the chosen speech model), a look-ahead buffer that stays ahead of the
-playhead, a cache so a movie is never processed twice, and SRT export. No movie audio,
+playhead, a cache so a movie is never processed twice, SRT export, an audio track picker
+and optional LGPL FFmpeg decoders for AC-3, E-AC-3 and DTS soundtracks. No movie audio,
 subtitles or keys leave the device. The only network use is downloading models in the
 Model Manager.
 
-Status: **Phase 2** (see [Phases](#phases)). Package `com.aivicventures.subtitletranslator`.
+Status: **Phase 3** (see [Phases](#phases)). Package `com.aivicventures.subtitletranslator`.
 
 ## The APK
 
 `AI-Subtitle-Translator-universal.apk` in this folder is a universal build. It contains
-arm64-v8a, armeabi-v7a, x86_64 and x86, is about 22.5 MB, and needs Android 8.0 (API 26) or
-later. It is signed with the Android debug key, which is fine for sideloading and testing.
+arm64-v8a, armeabi-v7a, x86_64 and x86, is about 25.7 MB (the FFmpeg decoders add 3.1 MB),
+and needs Android 8.0 (API 26) or later. It is signed with the Android debug key, which is fine for sideloading and testing.
 Use a real release key before any store upload.
 
 Install it with `adb install -r AI-Subtitle-Translator-universal.apk`, or by copying the
@@ -48,6 +49,28 @@ First run:
   playback position is remembered.
 - **Top bar**: −0.5 s and +0.5 s shift the subtitle timing; **SRT** exports the
   subtitles generated so far.
+- **Audio** (top bar, shown when the movie has more than one audio track): picks the track
+  that is played **and** recognised, for example the original language instead of a dub.
+  The choice is remembered per movie, and each track has its own subtitle cache. Without a
+  choice, the app takes the first track it can decode in the movie language set in
+  Settings, else the first track it can decode. Tracks the phone cannot decode are marked.
+- **AC-3, E-AC-3, DTS, TrueHD**: many phones have no decoder for these. The app then uses
+  its own FFmpeg decoders, both for playback and for recognition. The phone's own decoders
+  are always tried first. About & licences shows the FFmpeg version and licence.
+- **Use only the fast CPU cores** (Settings, on by default): keeps recognition and
+  translation off the slow power-saving cores of big.LITTLE phones; one thread on a slow
+  core holds all the others back. The fast cores come from the kernel's `cpu_capacity`
+  (speed × work per cycle), or from top frequencies on older kernels. The default thread
+  count is the number of fast cores, at most 4. The switch is greyed out on phones whose
+  cores are all alike.
+- **Battery saver** (Settings, off by default): half the threads, greedy M2M100 decoding and
+  no background work beyond the look-ahead (Full Movie mode still finishes). It also turns
+  on by itself, re-checked before every 30 s job:
+  - when the system Power Saver is on;
+  - when the battery is at 15 % or less and not charging;
+  - when the phone reports itself hot (thermal status SEVERE).
+  At thermal status CRITICAL it drops to one thread and pauses 10 s between jobs. The
+  status line shows why it is saving.
 - **Source language**: "Detect automatically" is the default. A fixed language is used
   as given.
 - **Translation** (Settings):
@@ -68,8 +91,28 @@ export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
 ./gradlew :app:testDebugUnitTest :app:assembleRelease
 ```
 
-The output is `app/build/outputs/apk/release/app-release.apk`. The native code is vendored
-**unmodified**:
+The output is `app/build/outputs/apk/release/app-release.apk`.
+
+The FFmpeg decoders are optional and built separately, once (about 25 minutes on this PC):
+
+```bash
+bash scripts/build_ffmpeg.sh "$ANDROID_SDK/ndk/27.1.12297006" C:/ffbuild
+```
+
+- It downloads FFmpeg 7.1.5, checks its SHA-256, and builds six audio decoders (`ac3`,
+  `eac3`, `dca`, `truehd`, `mlp`, `mp3`) plus libswresample as shared libraries for the four
+  ABIs.
+- It stops unless FFmpeg's own configuration reports "LGPL version 2.1 or later" with GPL,
+  version 3 and non-free all off. It also checks that every library's SONAME is its plain
+  file name, as Android requires.
+- The work dir must not contain spaces; on Windows it runs in Git Bash with the NDK's
+  `make.exe`.
+- Output goes to `app/src/main/ffmpeg/`. `jniLibs/` and `include/` are git-ignored; the
+  configure line per ABI (`configuration-<abi>.txt`) is versioned.
+- Without this step the app still builds and runs. It then has no FFmpeg fallback, and
+  About says so.
+
+The native code is vendored **unmodified**:
 - whisper.cpp v1.9.5 in `third_party/whisper.cpp`, identical to the release tarball,
   sha256 `ff1a9053…dc1720`.
 - CTranslate2 v4.8.3 in `third_party/ctranslate2`, with only the parts the build needs:
@@ -87,7 +130,9 @@ it and is force-included.
 | Part | Where | Notes |
 |---|---|---|
 | Native ASR | `app/src/main/cpp/` | whisper.cpp + ggml as shared libraries (details below this table). Small JNI layer: `initContext`, `detectSpeech`, `transcribe`, abort. |
-| Audio | `audio/AudioWindowReader.kt`, `Resampler.kt` | Media3 `MediaExtractorCompat` demux + `MediaCodec` decode of one time window. Packets before the window are skipped without decoding. Polyphase windowed-sinc resampling to 16 kHz mono. |
+| Audio | `audio/AudioWindowReader.kt`, `Resampler.kt`, `FfmpegAudio.kt`, `cpp/subtrans_ff.cpp` | Media3 `MediaExtractorCompat` demux of the chosen track + `MediaCodec` decode of one time window, or FFmpeg when the phone has no decoder. Packets before the window are skipped without decoding. Multichannel audio is downmixed with dialogue weighting (centre 0.4, front 0.2 each, surround 0.1 each, LFE 0 in 5.1). A plain average would leave centre-channel dialogue 16 dB down. Polyphase windowed-sinc resampling to 16 kHz mono. |
+| Playback of AC-3/DTS | `androidx/media3/decoder/ffmpeg/` (vendored), `cpp/media3_ffmpeg/ffmpeg_jni.cc` | Media3's own FFmpeg extension 1.11.1, unmodified, built against the same FFmpeg libraries; enabled only when the run-time licence check passes. |
+| Device tuning | `device/CpuTopology.kt`, `device/PowerMonitor.kt` | Fast-core detection and thread pinning (`sched_setaffinity` on the engine thread; whisper.cpp's and CTranslate2's worker threads inherit the mask). Power state from PowerManager and the battery broadcast, before every job. |
 | Recognition | `asr/WhisperAsr.kt`, `Hallucination.kt` | Pipeline below this table. |
 | Translation | `translate/M2M100Translator.kt`, `SentencePieceBpe.kt`, `cpp/subtrans_mt.cpp` | Details below this table. |
 | Look-ahead | `buffering/LookAheadEngine.kt`, `Coverage.kt` | Port of the Windows engine (details below this table). |
@@ -232,15 +277,79 @@ Found and fixed during these runs:
 - Catch-up mode produced lines for moments that had already passed. It now starts where the playhead will be when the job finishes.
 - Portrait subtitles wrapped into 4 ragged lines. The text now shrinks so each line fits.
 
+### Phase 3: audio tracks, FFmpeg decoders, device tuning
+
+Test movie: the Phase 1 FLEURS movie (movie 1) remuxed with five tracks, made with the
+Windows app's LGPL FFmpeg build:
+
+| # | Track | Content |
+|---|---|---|
+| 1 | AAC stereo, tagged English | **silence** (a decoy, so the wrong track is easy to spot) |
+| 2 | AC-3 5.1, 384 kb/s | the movie's speech |
+| 3 | E-AC-3 stereo, 192 kb/s | the movie's speech |
+| 4 | DTS 5.1 (FFmpeg's DTS encoder) | the movie's speech |
+
+The emulator has no AC-3, E-AC-3 or DTS decoder, so every speech track went through the
+FFmpeg path. Each run: Full Movie, Whisper small with its own translation, same APK,
+scored like Phase 2.
+
+| Track used | Decoder (recognition) | chrF | Missing / 16 | Time (4:17 movie) |
+|---|---|---|---|---|
+| Original movie, AAC (baseline, same APK) | `c2.android.aac.decoder` | **46.7** | 0 | 700 s ¹ |
+| 2: AC-3 5.1 | `ffmpeg:ac3` | **45.6** | 1 | 554 s |
+| 3: E-AC-3 | `ffmpeg:eac3` | **47.2** | 0 | 573 s |
+| 4: DTS 5.1 | `ffmpeg:dca` | **45.4** | 2 | 527 s |
+| 1: silent decoy | `c2.android.aac.decoder` | 0 lines | 16 | 52 s |
+
+¹ The APK was being rebuilt on the PC during this run.
+
+- The three lossy codecs score within ±1 of the AAC original: their compression changes
+  the audio slightly, and that moves Whisper's output a little either way. The baseline
+  matches Phase 2's small + Whisper result on the same movie (46.7) exactly.
+- FFmpeg decoding is fast: 33 s of AC-3 in 0.5–0.8 s on the emulator, against 4–5 s for the
+  platform AAC decoder.
+- The decoy produced no lines at all, so recognition really uses the chosen track. Each
+  track is cached separately (`translate@a1`, `@a2`, `@a3`).
+
+| Check | Result |
+|---|---|
+| JVM unit tests (Phase 3: fast-core selection by capacity and by frequency, CPU list parsing, every power-saving trigger, default-track choice, track labels, downmix weights, FFmpeg codec names) | 22/22 pass |
+| Licence check at build time | FFmpeg `config.h`: `FFMPEG_LICENSE "LGPL version 2.1 or later"`, `CONFIG_GPL 0`, `CONFIG_VERSION3 0`, `CONFIG_NONFREE 0`, for all four ABIs |
+| Licence check at run time | Log: "FFmpeg 7.1.5, LGPL version 2.1 or later"; Media3: "Loaded FfmpegAudioRenderer" |
+| Playback of the AC-3 track | Played by `ffmpegLavc61.19.101-ac3`; Android shows the app's audio track playing, 5.1 (mask `0x3f`), 48 kHz |
+| Audio picker | Lists "1. English AAC stereo, 2. Unknown language AC-3 5.1, 3. Unknown language E-AC-3 stereo, 4. Unknown language DTS 5.1". Choosing 4 restarts the screen: playback switches to `ffmpegLavc61.19.101-dca` and subtitles come from DTS. After a cold restart, track 4 is still chosen |
+| Default track (no choice yet) | Track 1, the first track the phone can decode (movie language on Automatic) |
+| Pinning to cores 0–1 (test hook) | `sched_setaffinity` succeeded. The engine thread, its 3 whisper.cpp workers and the audio prefetch thread run on cores 0–1; the UI and player threads stay on all 6 |
+| Fast-core detection on the emulator | No `cpu_capacity`; every core reports the same frequency. So the cores count as uniform, nothing is pinned, the switch is greyed out, and 4 threads is the default |
+| Battery saver setting | "power: saving=true reason=battery saver setting threads=2" |
+| Battery at 10 %, unplugged (`dumpsys battery`) | "reason=battery 10 % threads=2" |
+| Thermal SEVERE (`cmd thermalservice override-status 3`) | "reason=phone is hot threads=2" |
+| Thermal CRITICAL (status 4) | "critical=true reason=phone is very hot threads=1"; the first chunk took 110 s instead of 80 s |
+| Battery and thermal state | Reset after the tests |
+
+The emulator can show that these switches take effect. It cannot show whether they help:
+- On its 6 virtual cores, the first 30 s chunk took 80 s with 4 threads and 77–80 s with 2,
+  so here half the threads cost nothing.
+- The emulator's cores are identical, it has no battery, and its heat is the PC's.
+- Whether pinning and fewer threads save time or battery on a real big.LITTLE phone is
+  **unmeasured**.
+
 ### Not tested yet
 
 - A real ARM phone: speed, battery, heat, and memory with small on a 4 GB phone. M2M100
   speed and memory on ARM (Phase 2) are also unmeasured.
 - The SRT export save dialog end to end.
 - Very long files (the 2 h film was only tested as a 6-minute excerpt).
-- AC-3, E-AC-3 and DTS audio. These play only if the phone has a decoder; recognition
-  reports "unsupported audio" otherwise.
-- Multiple audio tracks: the first audio track is used.
+- Phase 3 on a real phone:
+  - fast-core pinning and thread counts on big.LITTLE;
+  - battery drain with and without the battery saver;
+  - throttling during a whole film.
+- The FFmpeg decoders on ARM. They were only run on x86_64, but they are the same source
+  built for each ABI.
+- TrueHD/MLP and MPEG audio through FFmpeg. These decoders are built but no test file was
+  run.
+- A real film with a dub and an original track. The multi-track test used a remuxed FLEURS
+  movie.
 
 ## Known limitations
 
@@ -256,23 +365,35 @@ Found and fixed during these runs:
   catch-up mode left gaps. A real phone's hardware video decoder and NEON/dotprod kernels
   should do better, but this has not been measured.
 - Telugu and Tamil are reported as not supported, by the publisher's decision.
+- **Codec patents**: AC-3, E-AC-3 and DTS are patented in some countries. FFmpeg's LGPL
+  licence grants no patent rights, so check the rules where the app is distributed. A
+  build without the FFmpeg step has no such decoders.
+- **DTS:X, TrueHD Atmos and E-AC-3 JOC**: only their core or bed channels are decoded.
+  That is enough for dialogue.
+- When a saved track is not the first, the player starts the first track's decoder for a
+  moment before switching. Nothing is heard, because playback starts paused.
 
 ## Phases
 
 1. **Phase 1** (done):
    - Playback, on-device Whisper translate to English, look-ahead buffering, cache, SRT
      export, Model Manager, and licences screen.
-2. **Phase 2 (this build)**:
+2. **Phase 2** (done):
    - M2M100 418M for text translation after Whisper transcription.
    - It runs on CTranslate2 (MIT) with an int8 model. ONNX Runtime was planned, but
      measurements on the PC showed it needs 2–4× the memory, and the int8 export was about
      10× slower per token; see THIRD_PARTY_NOTICES.md.
    - Per-language quality comparison against the Whisper translate task (above).
    - Automatic translator choice per speech model.
-3. **Phase 3**:
-   - Audio track picker.
-   - Optional LGPL-only FFmpeg audio decoder for AC-3/DTS, with a licence check.
-   - Real-device tuning: threads, big-core pinning, and a battery mode.
+3. **Phase 3 (this build)**:
+   - Audio track picker, remembered per movie, used for playback and recognition.
+   - Optional LGPL-only FFmpeg decoders (AC-3, E-AC-3, DTS, TrueHD, MPEG audio) for
+     recognition, and Media3's FFmpeg extension for playback, with build-time and run-time
+     licence checks.
+   - Device tuning: fast-core detection and pinning, default thread count, and a battery
+     saver that also follows Power Saver, low battery and heat.
+   - No real phone was available, so the tuning is implemented and shown to take effect,
+     but not measured. Measuring it on real phones is the obvious next step.
 
 ## Privacy and licences
 
@@ -280,8 +401,10 @@ Found and fixed during these runs:
   INTERNET, used for model downloads.
 - If a cloud feature is ever added, it will be off by default, and its key will be stored
   with Android Keystore.
-- Every dependency is MIT, Apache-2.0, BSD-2-Clause or zlib, with **no GPL or non-free
-  code**. See
+- Every dependency is MIT, Apache-2.0, BSD-2-Clause or zlib, except FFmpeg's decoders, which
+  are LGPL 2.1 or later. They are kept as separate shared libraries that can be replaced,
+  and their source (`ffmpeg-7.1.5.tar.xz`, kept next to the APK) must be shared along with
+  the APK. There is **no GPL or non-free code**. See
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
   [docs/dependencies-release.txt](docs/dependencies-release.txt). The licence texts are
   also shown in the app.
