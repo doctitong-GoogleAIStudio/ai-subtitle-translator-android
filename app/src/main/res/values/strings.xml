@@ -26,6 +26,13 @@
     <string name="setting_mode_help">How far ahead subtitles must be ready before playback starts. Use High Accuracy or Full Movie if your phone is slower than real time.</string>
     <string name="setting_model">Speech model</string>
     <string name="setting_model_auto">Best installed for this phone</string>
+    <string name="setting_translator">Translation</string>
+    <string name="setting_translator_help">Automatic uses M2M100 with Whisper tiny and base, where it translates much better, and Whisper\'s own translation with small, which scored a little higher in tests and is faster.</string>
+    <string name="setting_translator_missing">M2M100 is not installed, so Whisper translates. Download it in the Model Manager for better translations with Whisper tiny and base.</string>
+    <string name="setting_translator_32bit">This phone is 32-bit, so Whisper translates (M2M100 needs a 64-bit phone).</string>
+    <string name="translator_auto">Automatic (best for the speech model)</string>
+    <string name="translator_m2m100">M2M100 always</string>
+    <string name="translator_whisper">Whisper only (faster)</string>
     <string name="setting_language">Movie language</string>
     <string name="setting_language_help">Automatic detection works for most films; pick the language if it is misdetected (for example Bengali).</string>
     <string name="setting_threads">Processing threads</string>

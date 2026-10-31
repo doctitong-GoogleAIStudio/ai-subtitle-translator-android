@@ -1,0 +1,37 @@
+# Reference tokenisation by sentencepiece 0.2.2 of M2M100 sentencepiece.bpe.model (sha256 d8f7c76e...): base64(text) then pieces.
+U2UgcmVjb21pZW5kYSBhIGxvcyB2aWFqZXJvcyBxdWUgc2UgaW5mb3JtZW4gc29icmUgY3VhbHF1aWVyIHJpZXNnbyBkZSBjbGltYSBleHRyZW1vLg==
+▁Se ▁recom ienda ▁a ▁los ▁via jer os ▁que ▁se ▁in formen ▁sobre ▁cualquier ▁riesgo ▁de ▁clima ▁extre mo .
+64uk66asIOyVhOuemOydmCDsiJjsp4Eg6rCE6rKp7J2AIDE166+47YSw7J6F64uI64ukLiDqs7XsgqzripQgMjAxMeuFhCA47JuU7JeQIOuBneuCrOyKteuLiOuLpC4=
+▁다 리 ▁아래 의 ▁수 직 ▁간 격 은 ▁15 미터 입니다 . ▁공 사는 ▁2011 년 ▁8 월 에 ▁끝 났 습니다 .
+44Kk44Oz44K/44O844ON44OD44OI44Gn5qSc57Si44GZ44KM44Gw44CB5Zyw5YWD44Gu5Lya56S+44Gu5L2P5omA44GM6KaL44Gk44GL44KL44Gn44GX44KH44GG44CC
+▁ インターネット で 検索 すれば 、 地 元 の 会社 の 住 所 が見 つか る でしょう 。
+VW0gZGllIGJlc3RlIEF1c3NpY2h0IGF1ZiBIb25na29uZyB6dSBoYWJlbiwgdmVybGFzc2VuIFNpZSBkaWUgSW5zZWwu
+▁Um ▁die ▁beste ▁Aus sicht ▁auf ▁Hong kong ▁zu ▁haben , ▁verl assen ▁Sie ▁die ▁Insel .
+TCdhY2NpZGVudCBzJ2VzdCBwcm9kdWl0IGVuIGhhdXRlIG1vbnRhZ25lLg==
+▁L ' acc ident ▁s ' est ▁produit ▁en ▁ha ute ▁montag ne .
+6L+Z5LiN5piv5ZGK5Yir44CC6L+Z5piv5LiA5Liq56+H56ug55qE57uT5p2f77yM5Lmf5piv5paw56+H56ug55qE5byA5aeL44CC
+▁这 不是 告 别 。 这是 一个 篇 章 的 结束 , 也是 新 篇 章 的 开始 。
+0JzQsNC00LDQs9Cw0YHQutCw0YAg4oCUINGB0LDQvNGL0Lkg0LHQvtC70YzRiNC+0Lkg0L7RgdGC0YDQvtCyINC4INC+0YLQtNC10LvRjNC90YvQuSDQutC+0L3RgtC40L3QtdC90YIu
+▁Ма дага скар ▁— ▁самый ▁большой ▁о стров ▁и ▁отде льный ▁кон тинен т .
+SWwgYmxvZyDDqCB1bm8gc3RydW1lbnRvIGNoZSBpbmNvcmFnZ2lhIGxhIGNvbGxhYm9yYXppb25lLg==
+▁Il ▁blog ▁è ▁uno ▁str umento ▁che ▁incor aggia ▁la ▁collaborazione .
+ICDsmZwgIOq3uOugh+qyjCAgIOyYiOuvvO2VtD8gIEhlbGxv4oCmICDikaDvvJLvvJPvvKHvvKLvvKMgIA==
+▁왜 ▁그렇게 ▁예 민 해 ? ▁Hello ... ▁123 AB C
+V2FpdC4uLiB3aGF0PyEgIlF1b3RlZCIgKHBhcmVucykgW2JyYWNrZXRzXSAzLjE0JSAkNSAjdGFnIEB4
+▁Wa it ... ▁what ?! ▁" Qu oted " ▁( par ens ) ▁[ bra ck ets ] ▁3. 14 % ▁$ 5 ▁# tag ▁@ x
+776K776d772277247722776A7722776FIOOBqCDvvbbvvp7vvbfvvp4=
+▁ ハ ン カ ク カ タ カ ナ ▁と ▁ ガ ギ
+2YXYsdit2KjYpyDYqNin2YTYudin2YTZhdiMINmD2YrZgSDYrdin2YTZg9if
+▁مرح با ▁بالع الم ، ▁كيف ▁حال ك ؟
+4KSo4KSu4KS44KWN4KSk4KWHIOCkpuClgeCkqOCkv+Ckr+Ckviwg4KSG4KSqIOCkleCliOCkuOClhyDgpLngpYjgpII/
+▁नम स्ते ▁दुनिया , ▁आप ▁कैसे ▁हैं ?
+zpXOu867zrfOvc65zrrOrCDOus6xzrkg76yBIGxpZ2F0dXJlIMK9
+▁Ελλην ικά ▁και ▁fi ▁lig ature ▁1⁄2
+dGFiCWhlcmUKbmV3bGluZQ==
+▁tab ▁here ▁new line
+8J+YgCBlbW9qaSDwn5GN8J+PvSBvaw==
+▁😀 ▁emo ji ▁ 👍 🏽 ▁ok
+w4Qgw5Ygw5wgw58gw6kgw6ggw6o=
+▁Ä ▁Ö ▁Ü ▁ ß ▁é ▁è ▁ ê
+
+

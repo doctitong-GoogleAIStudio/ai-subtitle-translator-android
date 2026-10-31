@@ -12,12 +12,15 @@ data class AsrSegment(
     val language: String,
     val avgLogprob: Float,
     val noSpeechProb: Float,
+    /** True when [text] is already English (Whisper translated it, or it was spoken in English). */
+    val english: Boolean = true,
 )
 
 data class AsrResult(val segments: List<AsrSegment>, val language: String, val dropped: Int, val unsupportedLanguage: String?)
 
 /**
- * whisper.cpp speech recognition with the translate task (any Whisper language → English).
+ * whisper.cpp speech recognition. Without a text translator Whisper's translate task turns
+ * any language into English; with one, Whisper transcribes and the engine translates.
  * Not thread-safe: the engine calls it from one worker.
  */
 class WhisperAsr(context: Context, modelPath: String, private val vadPath: String?, val modelId: String) : AutoCloseable {
@@ -51,9 +54,17 @@ class WhisperAsr(context: Context, modelPath: String, private val vadPath: Strin
      *
      * @param language Whisper code or "auto"
      * @param thorough temperature fallback (High Accuracy / Full Movie, never in catch-up)
+     * @param textTranslation languages a text translator will handle: those are transcribed
+     *   (segments with english = false); null = Whisper translates everything
      * @return null when aborted
      */
-    fun run(samples: FloatArray, language: String, threads: Int, thorough: Boolean): AsrResult? {
+    fun run(
+        samples: FloatArray,
+        language: String,
+        threads: Int,
+        thorough: Boolean,
+        textTranslation: ((String) -> Boolean)? = null,
+    ): AsrResult? {
         aborted = false
         WhisperNative.clearAbort(ptr)
         val groups = speechGroups(samples) ?: return null
@@ -69,17 +80,17 @@ class WhisperAsr(context: Context, modelPath: String, private val vadPath: Strin
             val chunk = samples.copyOfRange(a, b)
             val fixed = language != "auto"
             val locked = if (fixed) language else mainLanguage
-            var raw = WhisperNative.transcribe(ptr, chunk, locked ?: "auto", true, threads, thorough, null, null)
-                ?: return null
+            var (raw, english) = decode(chunk, locked ?: "auto", threads, thorough, textTranslation) ?: return null
             var lang = raw.language.ifEmpty { locked ?: "auto" }
             if (!fixed && locked != null && meanLogprob(raw) < RECHECK_LP) {
-                val alt = WhisperNative.transcribe(ptr, chunk, "auto", true, threads, thorough, null, null) ?: return null
+                val (alt, altEnglish) = decode(chunk, "auto", threads, thorough, textTranslation) ?: return null
                 val altLang = alt.language
                 if (altLang.isNotEmpty() && altLang != locked && meanLogprob(alt) >= RECHECK_LP &&
                     meanLogprob(alt) > meanLogprob(raw)
                 ) {
                     Log.d(TAG, "group %.1f-%.1f re-checked: $locked -> $altLang".format(g0, g1))
                     raw = alt
+                    english = altEnglish
                     lang = altLang
                 }
             }
@@ -110,7 +121,7 @@ class WhisperAsr(context: Context, modelPath: String, private val vadPath: Strin
                     Log.d(TAG, "drop [$reason] %.2f-%.2f ns=%.2f lp=%.2f: %s".format(start, end, ns, lp, text))
                     continue
                 }
-                val seg = AsrSegment(start, end, kept, lang, lp, ns)
+                val seg = AsrSegment(start, end, kept, lang, lp, ns, english)
                 out.add(seg)
                 recent.addLast(seg)
                 if (recent.size > 2) recent.removeFirst()
@@ -122,6 +133,33 @@ class WhisperAsr(context: Context, modelPath: String, private val vadPath: Strin
         }
         val windowLang = seen.maxByOrNull { it.value }?.key ?: mainLanguage ?: language
         return AsrResult(out, windowLang, dropped, if (out.isEmpty()) unsupported else null)
+    }
+
+    /**
+     * One whisper_full call for a speech group. Transcribes when the language (given or
+     * detected) is English or one [textTranslation] handles, otherwise uses Whisper's
+     * translate task. Returns the result and whether its text is already English.
+     */
+    private fun decode(
+        chunk: FloatArray,
+        language: String,
+        threads: Int,
+        thorough: Boolean,
+        textTranslation: ((String) -> Boolean)?,
+    ): Pair<NativeResult, Boolean>? {
+        if (textTranslation == null) {
+            return (WhisperNative.transcribe(ptr, chunk, language, true, threads, thorough, null, null) ?: return null) to true
+        }
+        val transcribe = language == "auto" || language == "en" || textTranslation(language)
+        val raw = WhisperNative.transcribe(ptr, chunk, language, !transcribe, threads, thorough, null, null) ?: return null
+        if (!transcribe) return raw to true
+        val detected = raw.language.ifEmpty { language }
+        if (detected == "en") return raw to true
+        if (detected != "auto" && textTranslation(detected)) return raw to false
+        if (detected in Languages.unsupported) return raw to true // dropped by the caller
+        // The text translator does not know this language: let Whisper translate it.
+        val translated = WhisperNative.transcribe(ptr, chunk, detected, true, threads, thorough, null, null) ?: return null
+        return translated to true
     }
 
     /** Speech regions merged into groups (gap <= 1 s, <= 25 s each), padded; whole window if no VAD. */

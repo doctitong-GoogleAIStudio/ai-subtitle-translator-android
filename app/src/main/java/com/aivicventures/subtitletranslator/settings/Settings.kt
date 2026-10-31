@@ -66,6 +66,12 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("continue_whole_movie", false)
         set(v) = prefs.edit().putBoolean("continue_whole_movie", v).apply()
 
+    /** "auto" = M2M100 with speech models where it measured better (tiny, base), "m2m100" = always when
+     *  installed, "whisper" = Whisper's own translation. M2M100 also needs a 64-bit phone. */
+    var translator: String
+        get() = prefs.getString("translator", "auto") ?: "auto"
+        set(v) = prefs.edit().putString("translator", v).apply()
+
     var subtitleSizeSp: Int
         get() = prefs.getInt("subtitle_size_sp", 20)
         set(v) = prefs.edit().putInt("subtitle_size_sp", v.coerceIn(12, 40)).apply()

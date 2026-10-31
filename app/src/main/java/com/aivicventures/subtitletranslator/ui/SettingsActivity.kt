@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.settings.Languages
+import com.aivicventures.subtitletranslator.translate.TranslatorNative
 import com.aivicventures.subtitletranslator.settings.Mode
 
 class SettingsActivity : ComponentActivity() {
@@ -29,6 +30,18 @@ class SettingsActivity : ComponentActivity() {
         val options = listOf(getString(R.string.setting_model_auto)) + asr.map { it.name + if (app.models.isInstalled(it)) "" else " (not installed)" }
         val selected = asr.indexOfFirst { it.id == s.asrModel } + 1
         col.addFull(spinner(options, selected) { s.asrModel = if (it == 0) "" else asr[it - 1].id })
+
+        col.addFull(heading(getString(R.string.setting_translator)))
+        col.addFull(body(getString(
+            when {
+                !TranslatorNative.available -> R.string.setting_translator_32bit
+                app.models.translationModel() == null -> R.string.setting_translator_missing
+                else -> R.string.setting_translator_help
+            },
+        )))
+        val engines = listOf("auto", "m2m100", "whisper")
+        col.addFull(spinner(listOf(getString(R.string.translator_auto), getString(R.string.translator_m2m100), getString(R.string.translator_whisper)),
+            engines.indexOf(s.translator).coerceAtLeast(0)) { s.translator = engines[it] })
 
         col.addFull(heading(getString(R.string.setting_language)))
         col.addFull(body(getString(R.string.setting_language_help)))

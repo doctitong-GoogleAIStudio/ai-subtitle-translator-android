@@ -5,8 +5,10 @@ inside each utterance (start - 1.0 s .. end + 0.5 s) are joined and scored with 
 (character 6-grams, beta 2, whitespace ignored; corpus level, like sacrebleu's default).
 
 Input: an exported SRT file, or a logcat dump with the engine's "  0:00:04.6 → ..." lines.
+Several truth/subtitle pairs (one per test movie) are pooled into one score and one
+per-language table.
 
-    python scripts/score_e2e.py truth.json subtitles.srt|logcat.txt
+    python scripts/score_e2e.py truth.json subtitles.srt|logcat.txt [truth2.json log2.txt ...]
 """
 
 from __future__ import annotations
@@ -59,23 +61,32 @@ def chrf(hyps: list[str], refs: list[str], order: int = 6, beta: float = 2.0) ->
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
-    truth = json.load(open(sys.argv[1], encoding="utf-8"))
-    text = open(sys.argv[2], encoding="utf-8", errors="replace").read()
-    subs = parse_srt(text) if sys.argv[2].lower().endswith(".srt") else parse_logcat(text)
-    hyps, refs, missing = [], [], 0
-    for tr in truth:
-        inside = [t for s, t in subs if tr["start"] - 1.0 <= s < tr["end"] + 0.5]
-        hyp = " ".join(inside).strip()
-        hyps.append(hyp)
-        refs.append(tr["english"])
-        missing += not hyp
-        print(f"[{tr['lang']}] {tr['start']:7.1f}  REF: {tr['english']}\n{'':12}HYP: {hyp or '(missing)'}")
-    outside = [t for s, t in subs if not any(tr["start"] - 1.0 <= s < tr["end"] + 0.5 for tr in truth)]
-    print(f"\nlines: {len(subs)}  utterances: {len(truth)}  missing: {missing}  outside speech: {len(outside)}")
-    for t in outside:
-        print("  outside:", t)
+    args = sys.argv[1:]
+    if not args or len(args) % 2:
+        sys.exit(__doc__)
+    hyps, refs, langs_of, lines, missing, stray = [], [], [], 0, 0, 0
+    for truth_path, subs_path in zip(args[::2], args[1::2]):
+        truth = json.load(open(truth_path, encoding="utf-8"))
+        text = open(subs_path, encoding="utf-8", errors="replace").read()
+        subs = parse_srt(text) if subs_path.lower().endswith(".srt") else parse_logcat(text)
+        for tr in truth:
+            inside = [t for s, t in subs if tr["start"] - 1.0 <= s < tr["end"] + 0.5]
+            hyp = " ".join(inside).strip()
+            hyps.append(hyp)
+            refs.append(tr["english"])
+            langs_of.append(tr["lang"])
+            missing += not hyp
+            print(f"[{tr['lang']}] {tr['start']:7.1f}  REF: {tr['english']}\n{'':12}HYP: {hyp or '(missing)'}")
+        outside = [t for s, t in subs if not any(tr["start"] - 1.0 <= s < tr["end"] + 0.5 for tr in truth)]
+        for t in outside:
+            print("  outside:", t)
+        lines += len(subs)
+        stray += len(outside)
+    print(f"\nlines: {lines}  utterances: {len(hyps)}  missing: {missing}  outside speech: {stray}")
     print(f"chrF: {chrf(hyps, refs):.1f}")
-
+    print("per language: " + "  ".join(
+        f"{lang} {chrf([h for h, l in zip(hyps, langs_of) if l == lang], [r for r, l in zip(refs, langs_of) if l == lang]):.1f}"
+        for lang in sorted(set(langs_of))))
 
 if __name__ == "__main__":
     main()

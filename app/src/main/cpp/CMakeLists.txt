@@ -40,3 +40,29 @@ add_subdirectory(${WHISPER_DIR} whisper.cpp)
 add_library(subtrans_jni SHARED subtrans_jni.cpp)
 target_include_directories(subtrans_jni PRIVATE ${WHISPER_DIR}/include ${WHISPER_DIR}/ggml/include)
 target_link_libraries(subtrans_jni whisper ggml ggml-base log android)
+
+# Text translation (M2M100) with CTranslate2: Ruy is its only CPU backend here (int8 and
+# float GEMM), no MKL / OpenMP. Kept in its own JNI library so speech recognition still
+# works where it cannot load. CTranslate2's CPU kernels need a 64-bit ABI; 32-bit phones
+# keep Whisper's own translate task.
+if (NOT ANDROID_ABI STREQUAL "arm64-v8a" AND NOT ANDROID_ABI STREQUAL "x86_64")
+    return()
+endif()
+set(CT2_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/ctranslate2)
+set(WITH_MKL OFF CACHE BOOL "" FORCE)
+set(WITH_RUY ON CACHE BOOL "" FORCE)
+set(OPENMP_RUNTIME NONE CACHE STRING "" FORCE)
+set(BUILD_CLI OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(RUY_MINIMAL_BUILD ON CACHE BOOL "" FORCE)
+set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "" FORCE)
+set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(CPUINFO_BUILD_PKG_CONFIG OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CT2_DIR} ctranslate2)
+target_compile_options(ctranslate2 PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/ct2_android_compat.h)
+
+add_library(subtrans_mt SHARED subtrans_mt.cpp)
+target_include_directories(subtrans_mt PRIVATE ${CT2_DIR}/src)
+target_link_libraries(subtrans_mt ctranslate2 log)

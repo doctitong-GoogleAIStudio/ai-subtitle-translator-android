@@ -31,6 +31,8 @@ import androidx.media3.ui.PlayerView
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.asr.WhisperAsr
+import com.aivicventures.subtitletranslator.translate.M2M100Translator
+import com.aivicventures.subtitletranslator.translate.TranslatorNative
 import com.aivicventures.subtitletranslator.audio.AudioWindowReader
 import com.aivicventures.subtitletranslator.audio.Fingerprint
 import com.aivicventures.subtitletranslator.audio.UnsupportedAudioException
@@ -68,6 +70,7 @@ class PlayerActivity : ComponentActivity() {
     private var reader: AudioWindowReader? = null
     private var prefetchReader: AudioWindowReader? = null
     private var asr: WhisperAsr? = null
+    private var translator: M2M100Translator? = null
     private var fingerprint: String? = null
     private var movieName = "video"
     private var cues: List<Cue> = emptyList()
@@ -215,13 +218,28 @@ class PlayerActivity : ComponentActivity() {
                 val r = AudioWindowReader(this@PlayerActivity, uri)
                 val duration = r.durationSec.takeIf { it > 0 } ?: error("Could not read the movie's duration.")
                 app.db.upsertMovie(fp, uri.toString(), movieName, duration)
-                val profile = app.db.profileId(fp, spec.id, "translate", language)
                 val a = WhisperAsr(this@PlayerActivity, models.file(spec).path, models.file(vad).path, spec.id)
+                val mtSpec = models.translationModel()
+                val useMt = when (intent.getStringExtra(EXTRA_TRANSLATOR) ?: settings.translator) {
+                    "whisper" -> false
+                    "m2m100" -> true
+                    else -> spec.autoMt
+                }
+                val mt = if (useMt && mtSpec != null && TranslatorNative.available) {
+                    runCatching { M2M100Translator(models.folder(mtSpec), settings.threads) }
+                        .onFailure { Log.w(TAG, "M2M100 unavailable, Whisper translates", it) }
+                        .getOrNull()
+                } else null
+                translator = mt
+                // Separate cache per pipeline: Whisper-translated lines are never mixed with M2M100 ones.
+                val task = if (mt != null) mtSpec!!.id else "translate"
+                val profile = app.db.profileId(fp, spec.id, task, language)
                 val pre = if (!intent.getBooleanExtra(EXTRA_PREFETCH, true)) null
                 else runCatching { AudioWindowReader(this@PlayerActivity, uri, r.track) }.getOrNull()
                 prefetchReader = pre
-                val eng = LookAheadEngine(r, pre, a, app.db, profile, duration, mode, language, settings.threads, settings.continueWholeMovie)
-                Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} lang=$language threads=${settings.threads} prefetch=${pre != null} audio=${r.mime} cached=${eng.subtitles().size}".format(duration))
+                val eng = LookAheadEngine(r, pre, a, mt, app.db, profile, duration, mode, language, settings.threads, settings.continueWholeMovie,
+                    intent.getIntExtra(EXTRA_MT_BEAM, 0))
+                Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=${settings.threads} prefetch=${pre != null} audio=${r.mime} cached=${eng.subtitles().size}".format(duration))
                 Triple(eng, r, a)
             }
             reader = r
@@ -371,11 +389,13 @@ class PlayerActivity : ComponentActivity() {
         val r = reader
         val pre = prefetchReader
         val a = asr
+        val mt = translator
         if (::player.isInitialized) player.release()
         // Stop the worker first, then free the model: whisper.cpp must not be freed mid-call.
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO + NonCancellable).launch {
             eng?.stop()
             a?.close()
+            mt?.close()
             r?.close()
             pre?.close()
         }
@@ -390,5 +410,9 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_MODEL = "model"
         const val EXTRA_CLEAR_CACHE = "clear_cache"
         const val EXTRA_PREFETCH = "prefetch"
+        /** Test hook: "whisper" or "m2m100" overrides the translator setting. */
+        const val EXTRA_TRANSLATOR = "translator"
+        /** Test hook: M2M100 beam size (0 = chosen by mode). */
+        const val EXTRA_MT_BEAM = "mt_beam"
     }
 }

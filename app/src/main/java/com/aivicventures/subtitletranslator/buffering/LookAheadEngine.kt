@@ -1,11 +1,14 @@
 package com.aivicventures.subtitletranslator.buffering
 
 import android.util.Log
+import com.aivicventures.subtitletranslator.asr.AsrSegment
+import com.aivicventures.subtitletranslator.asr.Hallucination
 import com.aivicventures.subtitletranslator.asr.WhisperAsr
 import com.aivicventures.subtitletranslator.audio.AudioWindowReader
 import com.aivicventures.subtitletranslator.cache.CacheDb
 import com.aivicventures.subtitletranslator.settings.Mode
 import com.aivicventures.subtitletranslator.subtitles.Subtitle
+import com.aivicventures.subtitletranslator.translate.M2M100Translator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,16 +57,20 @@ data class EngineStatus(
  * The look-ahead scheduler (port of the Windows app's app/buffering): keeps at least the
  * mode's target of subtitles ready ahead of the playhead, nearest job first.
  *
- * Each job [t, t + chunk) decodes audio [t - LEAD, end + TAIL], runs Whisper (VAD + translate)
- * and keeps the segments that *start* inside [t, end) (owner-by-start), skipping any that
- * overlap lines already stored (deduplication at chunk joins). Results are cached in SQLite,
- * so a movie is never processed twice. Seeking far away aborts the running job.
+ * Each job [t, t + chunk) decodes audio [t - LEAD, end + TAIL], runs Whisper (VAD, then
+ * translate or transcribe) and keeps the segments that *start* inside [t, end)
+ * (owner-by-start), skipping any that overlap lines already stored (deduplication at chunk
+ * joins). With a text translator, only those kept lines are translated by M2M100. Results
+ * are cached in SQLite, so a movie is never processed twice. Seeking far away aborts the
+ * running job.
  */
 class LookAheadEngine(
     private val reader: AudioWindowReader,
     /** Second reader on its own thread: decodes the next window while Whisper is busy. */
     private val prefetchReader: AudioWindowReader?,
     private val asr: WhisperAsr,
+    /** M2M100 for lines Whisper transcribed; null = Whisper translates (Phase 1 path). */
+    private val translator: M2M100Translator?,
     private val db: CacheDb,
     private val profileId: Long,
     private val durationSec: Double,
@@ -71,6 +78,8 @@ class LookAheadEngine(
     private val language: String,
     private val threads: Int,
     private val continueWholeMovie: Boolean,
+    /** M2M100 beam size; 0 = 4 in Full Movie mode, otherwise greedy (beam 4 scored no better on FLEURS at 1.6× the cost). */
+    private val mtBeam: Int = 0,
 ) {
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "subtitle-engine").apply { priority = Thread.NORM_PRIORITY - 1 } }
     private val scope = CoroutineScope(SupervisorJob() + worker.asCoroutineDispatcher())
@@ -225,7 +234,7 @@ class LookAheadEngine(
         val t1 = System.nanoTime()
         prefetchNext(job)
         val result = try {
-            asr.run(audio, language, threads, mode.thorough && !job.hurry)
+            asr.run(audio, language, threads, mode.thorough && !job.hurry, translator?.let { { l: String -> M2M100Translator.supports(l) } })
         } catch (e: Throwable) {
             Log.e(TAG, "recognition failed", e)
             fail("Speech recognition failed: ${e.message}")
@@ -239,20 +248,29 @@ class LookAheadEngine(
             return
         }
         val asrSec = (t2 - t1) / 1e9
-        val chunkSpeed = (job.end - job.start) / ((t2 - t0) / 1e9).coerceAtLeast(0.01)
-        speed = if (speed == 0.0) chunkSpeed else speed * 0.7 + chunkSpeed * 0.3
         if (result.language.isNotEmpty()) lastLanguage = result.language
+
+        // Only this worker thread adds subtitles, so filtering outside the lock is safe.
+        val kept = result.segments.filter { seg ->
+            val s = winStart + seg.start
+            s >= job.start - 0.05 && s < job.end && !overlapsStored(s, min(winStart + seg.end, winEnd)) // owner-by-start
+        }
+        val t3 = System.nanoTime()
+        val english = translate(kept, if (mtBeam > 0) mtBeam else if (mode == Mode.FULL && !job.hurry) 4 else 1) ?: return
+        val mtSec = (System.nanoTime() - t3) / 1e9
+        val chunkSpeed = (job.end - job.start) / ((System.nanoTime() - t0) / 1e9).coerceAtLeast(0.01)
+        speed = if (speed == 0.0) chunkSpeed else speed * 0.7 + chunkSpeed * 0.3
 
         val added: List<Subtitle>
         synchronized(lock) {
             val fresh = mutableListOf<Subtitle>()
             val logprobs = mutableListOf<Float>()
-            for (seg in result.segments) {
+            kept.forEachIndexed { i, seg ->
+                val text = english[i]
+                if (text.isEmpty()) return@forEachIndexed
                 val s = winStart + seg.start
                 val e = min(winStart + seg.end, winEnd)
-                if (s < job.start - 0.05 || s >= job.end) continue // owner-by-start
-                if (overlapsStored(s, e)) continue
-                fresh.add(Subtitle(0, s, e, seg.text, "", seg.language))
+                fresh.add(Subtitle(0, s, e, text, if (seg.english) "" else seg.text, seg.language))
                 logprobs.add(seg.avgLogprob)
             }
             coverage.add(job.start, job.end)
@@ -262,8 +280,8 @@ class LookAheadEngine(
         }
         Log.i(
             TAG,
-            "chunk %.1f-%.1f audio=%.1fs decode=%.2fs asr=%.2fs speed=%.2fx lang=%s kept=%d dropped=%d hurry=%b gen=%d/%d"
-                .format(job.start, job.end, winEnd - winStart, (t1 - t0) / 1e9, asrSec, chunkSpeed, result.language,
+            "chunk %.1f-%.1f audio=%.1fs decode=%.2fs asr=%.2fs mt=%.2fs speed=%.2fx lang=%s kept=%d dropped=%d hurry=%b gen=%d/%d"
+                .format(job.start, job.end, winEnd - winStart, (t1 - t0) / 1e9, asrSec, mtSec, chunkSpeed, result.language,
                     added.size, result.dropped, job.hurry, job.generation, generation),
         )
         added.forEach { Log.i(TAG, "  %s → %s  %s".format(fmt(it.start), fmt(it.end), it.english)) }
@@ -272,6 +290,31 @@ class LookAheadEngine(
         }
         _version.value++
         publish()
+    }
+
+    /**
+     * English text for each kept segment: Whisper's own text, or M2M100's translation of the
+     * transcript (one batch per language). Empty string = drop the line (the translation
+     * came out as a known hallucination). Null after a translation failure.
+     */
+    private fun translate(kept: List<AsrSegment>, beam: Int): List<String>? {
+        val out = kept.map { if (it.english) it.text else "" }.toMutableList()
+        val mt = translator ?: return out
+        for ((lang, idx) in kept.indices.filter { !kept[it].english }.groupBy { kept[it].language }) {
+            val translated = try {
+                mt.translate(idx.map { kept[it].text }, lang, beam)
+            } catch (e: Throwable) {
+                Log.e(TAG, "translation failed", e)
+                fail("Translation failed: ${e.message}")
+                return null
+            }
+            idx.forEachIndexed { k, i ->
+                val text = WhisperAsr.clean(translated[k])
+                val seg = kept[i]
+                out[i] = if (Hallucination.isHallucination(text, seg.end - seg.start)) "" else Hallucination.stripHallucinations(text).trim()
+            }
+        }
+        return out
     }
 
     /** Starts decoding the window the next job will most likely need (the one right after

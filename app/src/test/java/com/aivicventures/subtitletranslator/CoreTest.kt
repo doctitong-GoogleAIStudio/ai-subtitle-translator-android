@@ -7,6 +7,9 @@ import com.aivicventures.subtitletranslator.buffering.Coverage
 import com.aivicventures.subtitletranslator.subtitles.Layout
 import com.aivicventures.subtitletranslator.subtitles.Srt
 import com.aivicventures.subtitletranslator.subtitles.Subtitle
+import com.aivicventures.subtitletranslator.translate.M2M100Translator
+import com.aivicventures.subtitletranslator.translate.SentencePieceBpe
+import org.junit.Assume
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -44,6 +47,34 @@ class CoreTest {
     @Test fun cleanRestoresMissingSpace() {
         assertEquals("the target point. Have you seen it?", WhisperAsr.clean("  the target point.Have you   seen it? "))
         assertEquals("Amara.org", WhisperAsr.clean("Amara.org"))
+    }
+
+    @Test fun sentencePieceNormalisation() {
+        assertEquals("▁a▁b", SentencePieceBpe.normalize("  a \t\n b  "))
+        assertEquals("▁ABC123", SentencePieceBpe.normalize("ＡＢＣ１２３"))
+        assertEquals("", SentencePieceBpe.normalize(" ​ "))
+        assertEquals("Hello world", SentencePieceBpe.decode(listOf("▁Hello", "▁wor", "ld")))
+    }
+
+    /** Same pieces as the reference sentencepiece library (model from test-media, if downloaded). */
+    @Test fun sentencePieceMatchesReference() {
+        val model = java.io.File("../test-media/m2m100-ct2/sentencepiece.bpe.model")
+        Assume.assumeTrue("M2M100 tokenizer not downloaded", model.exists())
+        val spm = SentencePieceBpe(model.readBytes())
+        val lines = javaClass.getResourceAsStream("/spm_gold.txt")!!.bufferedReader(Charsets.UTF_8).readLines().filter { !it.startsWith("#") }
+        assertTrue(lines.size >= 30)
+        for (i in lines.indices step 2) {
+            val text = String(java.util.Base64.getDecoder().decode(lines[i]), Charsets.UTF_8)
+            val expected = lines[i + 1].split(' ').filter { it.isNotEmpty() }
+            assertEquals("pieces for: $text", expected, spm.encode(text))
+        }
+    }
+
+    @Test fun m2m100LanguageCodes() {
+        assertEquals("ko", M2M100Translator.sourceCode("ko"))
+        assertEquals("jv", M2M100Translator.sourceCode("jw"))
+        assertNull(M2M100Translator.sourceCode("en"))
+        assertNull(M2M100Translator.sourceCode("haw"))
     }
 
     @Test fun speechRegionsGrouped() {

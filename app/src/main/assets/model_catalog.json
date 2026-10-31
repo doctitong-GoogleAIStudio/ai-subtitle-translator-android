@@ -11,7 +11,8 @@
       "size": 32152673,
       "sha256": "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
       "license": "MIT (OpenAI Whisper; ggml conversion by the whisper.cpp authors)",
-      "ram_mb": 150
+      "ram_mb": 150,
+      "auto_mt": true
     },
     {
       "id": "whisper-base-q5_1",
@@ -23,7 +24,8 @@
       "size": 59707625,
       "sha256": "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
       "license": "MIT (OpenAI Whisper; ggml conversion by the whisper.cpp authors)",
-      "ram_mb": 250
+      "ram_mb": 250,
+      "auto_mt": true
     },
     {
       "id": "whisper-small-q5_1",
@@ -48,6 +50,40 @@
       "sha256": "2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987",
       "license": "MIT (Silero Team; ggml conversion by the whisper.cpp authors)",
       "ram_mb": 5
+    },
+    {
+      "id": "m2m100-418m-int8",
+      "kind": "mt",
+      "name": "M2M100 418M translator (int8)",
+      "description": "Translates what Whisper hears into English. Much better than Whisper's own translation with tiny and base; with small, Whisper's own translation scored a little higher in our tests. 64-bit phones with 4 GB RAM or more.",
+      "files": [
+        {
+          "path": "m2m100-418m/model.bin",
+          "url": "https://huggingface.co/jncraton/m2m100_418M-ct2-int8/resolve/7c1b2620a4e58dacecbd8bf89cfd6da7eb9eb7b0/model.bin",
+          "size": 490667713,
+          "sha256": "d6703dd9f920ff896e45c3d97b490761bed5944937b90bbe6a7245f5652542d4"
+        },
+        {
+          "path": "m2m100-418m/shared_vocabulary.json",
+          "url": "https://huggingface.co/jncraton/m2m100_418M-ct2-int8/resolve/7c1b2620a4e58dacecbd8bf89cfd6da7eb9eb7b0/shared_vocabulary.json",
+          "size": 2796509,
+          "sha256": "7eb5d0ff184c6095c7c10f9911c0aea492250abd12854f9c3d787c64b1c6397e"
+        },
+        {
+          "path": "m2m100-418m/config.json",
+          "url": "https://huggingface.co/jncraton/m2m100_418M-ct2-int8/resolve/7c1b2620a4e58dacecbd8bf89cfd6da7eb9eb7b0/config.json",
+          "size": 189,
+          "sha256": "4244772990e30069563e3ddfb4ad6dc95bdfd2ac3de667ea8858c9b0a8433fa8"
+        },
+        {
+          "path": "m2m100-418m/sentencepiece.bpe.model",
+          "url": "https://huggingface.co/jncraton/m2m100_418M-ct2-int8/resolve/7c1b2620a4e58dacecbd8bf89cfd6da7eb9eb7b0/sentencepiece.bpe.model",
+          "size": 2423393,
+          "sha256": "d8f7c76ed2a5e0822be39f0a4f95a55eb19c78f4593ce609e2edbc2aea4d380a"
+        }
+      ],
+      "license": "MIT (Meta AI M2M100; CTranslate2 int8 conversion by Jon Craton)",
+      "ram_mb": 600
     }
   ]
 }
