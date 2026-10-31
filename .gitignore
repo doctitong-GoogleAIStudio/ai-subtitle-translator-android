@@ -18,3 +18,5 @@ app/src/main/ffmpeg/jniLibs/
 app/src/main/ffmpeg/include/
 # FFmpeg source tarball shared alongside the APK (LGPL); downloaded by scripts/build_ffmpeg.sh.
 /ffmpeg-*.tar.xz
+# device benchmark output (scripts/device_bench.sh)
+/bench/

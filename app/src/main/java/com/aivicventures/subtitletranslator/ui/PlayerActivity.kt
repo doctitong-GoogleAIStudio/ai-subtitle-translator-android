@@ -225,6 +225,7 @@ class PlayerActivity : ComponentActivity() {
     private suspend fun openEngine(uri: Uri) {
         val models = app.models
         val spec = models.chooseAsr(intent.getStringExtra(EXTRA_MODEL) ?: settings.asrModel)
+        val threads = intent.getIntExtra(EXTRA_THREADS, 0).takeIf { it in 1..8 } ?: settings.threads
         val vad = models.vadModel()
         if (spec == null || vad == null) {
             showGate(getString(R.string.need_models))
@@ -262,7 +263,7 @@ class PlayerActivity : ComponentActivity() {
                 val pins = intent.getStringExtra(EXTRA_PIN_CPUS)?.let { CpuTopology.parseCpuList(it) }
                     ?: CpuTopology.fastCores.takeIf { settings.fastCoresOnly && CpuTopology.heterogeneous }
                 val mt = if (useMt && mtSpec != null && TranslatorNative.available) {
-                    runCatching { CpuTopology.withPinned(pins) { M2M100Translator(models.folder(mtSpec), settings.threads) } }
+                    runCatching { CpuTopology.withPinned(pins) { M2M100Translator(models.folder(mtSpec), threads) } }
                         .onFailure { Log.w(TAG, "M2M100 unavailable, Whisper translates", it) }
                         .getOrNull()
                 } else null
@@ -276,9 +277,9 @@ class PlayerActivity : ComponentActivity() {
                 else runCatching { AudioWindowReader(this@PlayerActivity, uri, r.track) }.getOrNull()
                 prefetchReader = pre
                 val power = PowerMonitor(this@PlayerActivity, intent.getBooleanExtra(EXTRA_BATTERY_SAVER, settings.batterySaver))
-                val eng = LookAheadEngine(r, pre, a, mt, app.db, profile, duration, mode, language, settings.threads, settings.continueWholeMovie,
+                val eng = LookAheadEngine(r, pre, a, mt, app.db, profile, duration, mode, language, threads, settings.continueWholeMovie,
                     intent.getIntExtra(EXTRA_MT_BEAM, 0), power, pins)
-                Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=${settings.threads} prefetch=${pre != null} audio=${r.mime} decoder=${r.decoderName} track=${ordinal + 1}/${tracks.size} pin=${pins ?: "-"} cached=${eng.subtitles().size}".format(duration))
+                Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=$threads prefetch=${pre != null} audio=${r.mime} decoder=${r.decoderName} track=${ordinal + 1}/${tracks.size} pin=${pins ?: "-"} cached=${eng.subtitles().size}".format(duration))
                 Triple(eng, r, a)
             }
             reader = r
@@ -492,5 +493,7 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_AUDIO_TRACK = "audio_track"
         const val EXTRA_PIN_CPUS = "pin_cpus"
         const val EXTRA_BATTERY_SAVER = "battery_saver"
+        /** Test hook: thread count (1-8) instead of the setting, for benchmarks. */
+        const val EXTRA_THREADS = "threads"
     }
 }

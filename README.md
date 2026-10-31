@@ -351,6 +351,11 @@ The emulator can show that these switches take effect. It cannot show whether th
 - A real film with a dub and an original track. The multi-track test used a remuxed FLEURS
   movie.
 
+[docs/real-device-test-plan.md](docs/real-device-test-plan.md) covers the real-phone
+items. It runs from the PC with `bash scripts/device_bench.sh <suite>`, which measures speed,
+memory, heat, estimated battery use and chrF. It then says which default each result
+decides.
+
 ## Known limitations
 
 - **Translation quality**: small with its own translation was best on FLEURS (44.8). base
@@ -393,7 +398,10 @@ The emulator can show that these switches take effect. It cannot show whether th
    - Device tuning: fast-core detection and pinning, default thread count, and a battery
      saver that also follows Power Saver, low battery and heat.
    - No real phone was available, so the tuning is implemented and shown to take effect,
-     but not measured. Measuring it on real phones is the obvious next step.
+     but not measured.
+4. **Next: real-phone measurements**:
+   - Follow [docs/real-device-test-plan.md](docs/real-device-test-plan.md) on one or more
+     phones, then adjust the defaults from the results.
 
 ## Privacy and licences
 
