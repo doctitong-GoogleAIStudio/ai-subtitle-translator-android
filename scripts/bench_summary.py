@@ -17,6 +17,7 @@ import re
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # no __pycache__ next to the scripts
 _spec = importlib.util.spec_from_file_location("score_e2e", Path(__file__).with_name("score_e2e.py"))
 score_e2e = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(score_e2e)
