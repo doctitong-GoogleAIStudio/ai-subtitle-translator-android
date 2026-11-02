@@ -1,7 +1,7 @@
 package com.aivicventures.subtitletranslator.ui
 
-import android.app.AlertDialog
-import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -11,7 +11,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -19,6 +18,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -28,10 +28,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
@@ -53,6 +55,8 @@ import com.aivicventures.subtitletranslator.settings.Mode
 import com.aivicventures.subtitletranslator.subtitles.Cue
 import com.aivicventures.subtitletranslator.subtitles.Layout
 import com.aivicventures.subtitletranslator.subtitles.Srt
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -88,7 +92,9 @@ class PlayerActivity : ComponentActivity() {
     private var pausedForBuffer = false
     private var lastStatus: EngineStatus? = null
     private var controllerVisible = false
-    private lateinit var audioButton: Button
+    private lateinit var audioButton: MaterialButton
+    private lateinit var fitButton: MaterialButton
+    private var orientationChosen = false
     private var audioTracks: List<AudioTrackInfo> = emptyList()
     private var audioOrdinal = 0
     private var audioApplied = false
@@ -104,10 +110,8 @@ class PlayerActivity : ComponentActivity() {
         val uri = intent.data ?: run { finish(); return }
         mode = intent.getStringExtra(EXTRA_MODE)?.let { runCatching { Mode.valueOf(it) }.getOrNull() } ?: settings.mode
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        hideSystemBars()
         buildViews()
 
         // Media3's FFmpeg extension plays what the phone cannot (AC-3, DTS, …); platform
@@ -131,6 +135,14 @@ class PlayerActivity : ComponentActivity() {
             }
 
             override fun onTracksChanged(tracks: Tracks) = applyAudioTrack()
+
+            // Landscape movies open rotated to landscape, full screen (setting, on by default).
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (orientationChosen || videoSize.width == 0 || videoSize.height == 0) return
+                orientationChosen = true
+                val wide = videoSize.width * videoSize.pixelWidthHeightRatio >= videoSize.height
+                if (wide && settings.landscapeFullScreen) setFullScreen(true)
+            }
         })
 
         movieName = MainActivity.displayName(this, uri)
@@ -142,6 +154,8 @@ class PlayerActivity : ComponentActivity() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         playerView = PlayerView(this).apply {
             setShowSubtitleButton(false)
+            // The controller's full-screen button rotates to landscape and back.
+            setFullscreenButtonClickListener { full -> setFullScreen(full) }
             setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
                 controllerVisible = v == View.VISIBLE
                 topBar.visibility = if (controllerVisible || lastStatus?.ready != true) View.VISIBLE else View.GONE
@@ -164,43 +178,89 @@ class PlayerActivity : ComponentActivity() {
         topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0x88000000.toInt())
-            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xCC000000.toInt(), 0x00000000),
+            )
+            setPadding(dp(12), dp(6), dp(8), dp(14))
         }
         statusView = TextView(this).apply { setTextColor(Color.WHITE); textSize = 13f }
         topBar.addView(statusView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        audioButton = smallButton(getString(R.string.audio_track)) { chooseAudioTrack() }.apply { visibility = View.GONE }
+        audioButton = smallButton(getString(R.string.audio_track), R.drawable.ic_audio) { chooseAudioTrack() }.apply { visibility = View.GONE }
         topBar.addView(audioButton)
+        fitButton = smallButton(getString(R.string.fill_screen), R.drawable.ic_aspect) { toggleFill() }
+        topBar.addView(fitButton)
         topBar.addView(smallButton("−0.5 s") { nudgeDelay(-0.5f) })
         topBar.addView(smallButton("+0.5 s") { nudgeDelay(0.5f) })
-        topBar.addView(smallButton(getString(R.string.export_srt)) { askExport() })
+        topBar.addView(smallButton(getString(R.string.export_srt), R.drawable.ic_download) { askExport() })
         root.addView(topBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
+        // Keep the bar's buttons clear of a camera cutout or rounded corners.
+        ViewCompat.setOnApplyWindowInsetsListener(topBar) { v, insets ->
+            val c = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            v.setPadding(dp(12) + c.left, dp(6) + c.top, dp(8) + c.right, dp(14))
+            insets
+        }
 
         gate = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(0xCC000000.toInt())
-            setPadding(dp(24), dp(16), dp(24), dp(16))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(20).toFloat()
+                setColor(0xE61D2024.toInt())
+            }
+            setPadding(dp(28), dp(20), dp(28), dp(16))
         }
         gateText = TextView(this).apply { setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER }
         gate.addView(gateText)
-        gate.addView(smallButton(getString(R.string.play_now)) {
+        gate.addView(button(getString(R.string.play_now), R.drawable.ic_play) {
             autoStartPending = false
             gate.visibility = View.GONE
             player.play()
-        })
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         root.addView(gate, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         setContentView(root)
         placeSubtitles()
     }
 
-    private fun smallButton(text: String, onClick: () -> Unit) = Button(this).apply {
-        this.text = text
-        isAllCaps = false
-        textSize = 12f
+    private fun smallButton(text: String, icon: Int = 0, onClick: () -> Unit) = textButton(text, icon, onClick).apply {
+        setTextColor(Color.WHITE)
+        iconTint = android.content.res.ColorStateList.valueOf(Color.WHITE)
+        textSize = 13f
         minWidth = 0
         minimumWidth = 0
-        setOnClickListener { onClick() }
+        setPadding(dp(10), 0, dp(10), 0)
+    }
+
+    private fun hideSystemBars() {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    /** Full screen = rotated to landscape (either way round, by the sensor); off = portrait. */
+    private fun setFullScreen(full: Boolean) {
+        requestedOrientation = if (full) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+        playerView.setFullscreenButtonState(full)
+        hideSystemBars()
+    }
+
+    /** Fit shows the whole picture; Fill crops it to cover the screen. */
+    private fun toggleFill() {
+        val fill = playerView.resizeMode != AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        playerView.resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+        fitButton.text = getString(if (fill) R.string.fit_screen else R.string.fill_screen)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        playerView.setFullscreenButtonState(newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
+        hideSystemBars()
+        shownCue = null  // re-fit the current line to the new width
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()  // dialogs and swipes bring the bars back
     }
 
     /** Shrinks the text (never enlarges it) so each layout line stays on one screen line. */
@@ -228,12 +288,7 @@ class PlayerActivity : ComponentActivity() {
         val threads = intent.getIntExtra(EXTRA_THREADS, 0).takeIf { it in 1..8 } ?: settings.threads
         val vad = models.vadModel()
         if (spec == null || vad == null) {
-            showGate(getString(R.string.need_models))
-            AlertDialog.Builder(this)
-                .setMessage(R.string.need_models)
-                .setPositiveButton(R.string.models_title) { _, _ -> startActivity(Intent(this, ModelsActivity::class.java)); finish() }
-                .setNegativeButton(R.string.play_without) { _, _ -> gate.visibility = View.GONE; player.play() }
-                .show()
+            showError(getString(R.string.models_missing))
             return
         }
         showGate(getString(R.string.loading_model, spec.name))
@@ -251,7 +306,7 @@ class PlayerActivity : ComponentActivity() {
                 val r = AudioWindowReader(this@PlayerActivity, uri, tracks.getOrNull(ordinal)?.index)
                 val duration = r.durationSec.takeIf { it > 0 } ?: error("Could not read the movie's duration.")
                 app.db.upsertMovie(fp, uri.toString(), movieName, duration)
-                val a = WhisperAsr(this@PlayerActivity, models.file(spec).path, models.file(vad).path, spec.id)
+                val a = models.weights(spec).use { WhisperAsr(this@PlayerActivity, it, models.localFile(vad.files.first()).path, spec.id) }
                 val mtSpec = models.translationModel()
                 val useMt = when (intent.getStringExtra(EXTRA_TRANSLATOR) ?: settings.translator) {
                     "whisper" -> false
@@ -263,7 +318,7 @@ class PlayerActivity : ComponentActivity() {
                 val pins = intent.getStringExtra(EXTRA_PIN_CPUS)?.let { CpuTopology.parseCpuList(it) }
                     ?: CpuTopology.fastCores.takeIf { settings.fastCoresOnly && CpuTopology.heterogeneous }
                 val mt = if (useMt && mtSpec != null && TranslatorNative.available) {
-                    runCatching { CpuTopology.withPinned(pins) { M2M100Translator(models.folder(mtSpec), threads) } }
+                    runCatching { CpuTopology.withPinned(pins) { models.weights(mtSpec).use { M2M100Translator(models.localFolder(mtSpec), it, threads) } } }
                         .onFailure { Log.w(TAG, "M2M100 unavailable, Whisper translates", it) }
                         .getOrNull()
                 } else null
@@ -406,7 +461,7 @@ class PlayerActivity : ComponentActivity() {
     private fun chooseAudioTrack() {
         val fp = fingerprint ?: return
         val labels = audioTracks.map { it.describe() + if (it.decodable) "" else " " + getString(R.string.audio_track_unsupported) }
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle(R.string.audio_track_title)
             .setSingleChoiceItems(labels.toTypedArray(), audioOrdinal) { dialog, which ->
                 dialog.dismiss()
@@ -430,7 +485,7 @@ class PlayerActivity : ComponentActivity() {
         val s = lastStatus ?: return
         val name = movieName.substringBeforeLast('.') + ".en.srt"
         if (s.coveredSec < s.durationSec - 0.5) {
-            AlertDialog.Builder(this)
+            MaterialAlertDialogBuilder(this)
                 .setMessage(getString(R.string.export_partial, 100 * s.coveredSec / s.durationSec.coerceAtLeast(1.0)))
                 .setPositiveButton(R.string.export_srt) { _, _ -> exportSrt.launch(name) }
                 .setNegativeButton(R.string.cancel, null)

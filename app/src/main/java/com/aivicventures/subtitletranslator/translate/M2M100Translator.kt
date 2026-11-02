@@ -1,5 +1,6 @@
 package com.aivicventures.subtitletranslator.translate
 
+import android.content.res.AssetFileDescriptor
 import android.util.Log
 import java.io.File
 
@@ -12,7 +13,8 @@ object TranslatorNative {
             .isSuccess
     }
 
-    external fun init(modelDir: String, threads: Int): Long
+    /** [modelDir] holds config and vocabulary; model.bin is [length] bytes at [offset] of [fd]. */
+    external fun init(modelDir: String, threads: Int, fd: Int, offset: Long, length: Long): Long
     external fun free(ptr: Long)
     external fun translate(ptr: Long, sources: Array<ByteArray>, targetPrefix: String, beam: Int, maxLength: Int): Array<ByteArray>?
 }
@@ -22,9 +24,9 @@ object TranslatorNative {
  * Windows app's decoding settings (repetition penalty 1.1, no repeated 4-grams). Not
  * thread-safe: the engine calls it from its single worker.
  */
-class M2M100Translator(modelDir: File, threads: Int) : AutoCloseable {
+class M2M100Translator(modelDir: File, weights: AssetFileDescriptor, threads: Int) : AutoCloseable {
     private val tokenizer = SentencePieceBpe(File(modelDir, "sentencepiece.bpe.model").readBytes())
-    private var ptr = TranslatorNative.init(modelDir.path, threads)
+    private var ptr = TranslatorNative.init(modelDir.path, threads, weights.parcelFileDescriptor.fd, weights.startOffset, weights.length)
 
     /** Translates [texts] spoken in [language] (Whisper code) into English, in order.
      *  [beam] 4 = the Windows app's quality setting, 1 = greedy (fast). */

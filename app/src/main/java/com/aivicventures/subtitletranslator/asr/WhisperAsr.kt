@@ -1,6 +1,7 @@
 package com.aivicventures.subtitletranslator.asr
 
 import android.content.Context
+import android.content.res.AssetFileDescriptor
 import android.util.Log
 import com.aivicventures.subtitletranslator.settings.Languages
 
@@ -23,13 +24,13 @@ data class AsrResult(val segments: List<AsrSegment>, val language: String, val d
  * any language into English; with one, Whisper transcribes and the engine translates.
  * Not thread-safe: the engine calls it from one worker.
  */
-class WhisperAsr(context: Context, modelPath: String, private val vadPath: String?, val modelId: String) : AutoCloseable {
+class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vadPath: String?, val modelId: String) : AutoCloseable {
     private var ptr: Long
 
     init {
         WhisperNative.ensureLoaded(context)
         val t = System.nanoTime()
-        ptr = WhisperNative.initContext(modelPath)
+        ptr = WhisperNative.initContext(weights.parcelFileDescriptor.fd, weights.startOffset, weights.length)
         require(ptr != 0L) { "Could not load the speech model (file damaged or not enough memory)." }
         Log.i(TAG, "loaded $modelId in ${(System.nanoTime() - t) / 1_000_000} ms; ${WhisperNative.systemInfo()}")
     }

@@ -20,3 +20,8 @@ app/src/main/ffmpeg/include/
 /ffmpeg-*.tar.xz
 # device benchmark output (scripts/device_bench.sh)
 /bench/
+# Models bundled into the APK (fetched by the fetchModels Gradle task, about 780 MB).
+/bundled-models/
+# Release signing key and its passwords: never committed, back them up yourself.
+/keystore.properties
+/signing/

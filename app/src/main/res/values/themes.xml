@@ -1,11 +1,89 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="AppTheme" parent="android:Theme.Material">
-        <item name="android:colorPrimary">#1E3A5F</item>
-        <item name="android:colorAccent">#F2B134</item>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Material 3, light or dark with the system; brand colours instead of wallpaper colours. -->
+    <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/role_primary</item>
+        <item name="colorOnPrimary">@color/role_on_primary</item>
+        <item name="colorPrimaryContainer">@color/role_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/role_on_primary_container</item>
+        <item name="colorSecondary">@color/role_secondary</item>
+        <item name="colorOnSecondary">@color/role_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/role_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/role_on_secondary_container</item>
+        <item name="colorTertiary">@color/role_tertiary</item>
+        <item name="colorOnTertiary">@color/role_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/role_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/role_on_tertiary_container</item>
+        <item name="colorError">@color/role_error</item>
+        <item name="colorOnError">@color/role_on_error</item>
+        <item name="colorErrorContainer">@color/role_error_container</item>
+        <item name="colorOnErrorContainer">@color/role_on_error_container</item>
+        <item name="android:colorBackground">@color/role_background</item>
+        <item name="colorOnBackground">@color/role_on_background</item>
+        <item name="colorSurface">@color/role_surface</item>
+        <item name="colorOnSurface">@color/role_on_surface</item>
+        <item name="colorSurfaceVariant">@color/role_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/role_on_surface_variant</item>
+        <item name="colorOutline">@color/role_outline</item>
+        <item name="colorOutlineVariant">@color/role_outline_variant</item>
+        <item name="colorSurfaceContainerLowest">@color/role_surface_container_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/role_surface_container_low</item>
+        <item name="colorSurfaceContainer">@color/role_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/role_surface_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/role_surface_container_highest</item>
+        <item name="colorSurfaceDim">@color/role_surface_dim</item>
+        <item name="colorSurfaceBright">@color/role_surface_bright</item>
+        <item name="colorSurfaceInverse">@color/role_inverse_surface</item>
+        <item name="colorOnSurfaceInverse">@color/role_inverse_on_surface</item>
+        <item name="colorPrimaryInverse">@color/role_inverse_primary</item>
+        <item name="appTonalButtonStyle">@style/Widget.Material3.Button.TonalButton</item>
+        <item name="appTextButtonStyle">@style/Widget.Material3.Button.TextButton</item>
+        <item name="appOutlinedButtonStyle">@style/Widget.Material3.Button.OutlinedButton</item>
+        <item name="appIconButtonStyle">@style/Widget.Material3.Button.IconButton</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_system_bars</item>
     </style>
-    <style name="AppTheme.Player" parent="android:Theme.Material.NoActionBar">
+    <!-- The player is always dark and full screen. -->
+    <style name="AppTheme.Player" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/dark_primary</item>
+        <item name="colorOnPrimary">@color/dark_on_primary</item>
+        <item name="colorPrimaryContainer">@color/dark_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/dark_on_primary_container</item>
+        <item name="colorSecondary">@color/dark_secondary</item>
+        <item name="colorOnSecondary">@color/dark_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/dark_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/dark_on_secondary_container</item>
+        <item name="colorTertiary">@color/dark_tertiary</item>
+        <item name="colorOnTertiary">@color/dark_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/dark_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/dark_on_tertiary_container</item>
+        <item name="colorError">@color/dark_error</item>
+        <item name="colorOnError">@color/dark_on_error</item>
+        <item name="colorErrorContainer">@color/dark_error_container</item>
+        <item name="colorOnErrorContainer">@color/dark_on_error_container</item>
+        <item name="android:colorBackground">@color/dark_background</item>
+        <item name="colorOnBackground">@color/dark_on_background</item>
+        <item name="colorSurface">@color/dark_surface</item>
+        <item name="colorOnSurface">@color/dark_on_surface</item>
+        <item name="colorSurfaceVariant">@color/dark_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/dark_on_surface_variant</item>
+        <item name="colorOutline">@color/dark_outline</item>
+        <item name="colorOutlineVariant">@color/dark_outline_variant</item>
+        <item name="colorSurfaceContainerLowest">@color/dark_surface_container_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/dark_surface_container_low</item>
+        <item name="colorSurfaceContainer">@color/dark_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/dark_surface_container_high</item>
+        <item name="colorSurfaceContainerHighest">@color/dark_surface_container_highest</item>
+        <item name="colorSurfaceDim">@color/dark_surface_dim</item>
+        <item name="colorSurfaceBright">@color/dark_surface_bright</item>
+        <item name="colorSurfaceInverse">@color/dark_inverse_surface</item>
+        <item name="colorOnSurfaceInverse">@color/dark_inverse_on_surface</item>
+        <item name="colorPrimaryInverse">@color/dark_inverse_primary</item>
+        <item name="appTonalButtonStyle">@style/Widget.Material3.Button.TonalButton</item>
+        <item name="appTextButtonStyle">@style/Widget.Material3.Button.TextButton</item>
+        <item name="appOutlinedButtonStyle">@style/Widget.Material3.Button.OutlinedButton</item>
+        <item name="appIconButtonStyle">@style/Widget.Material3.Button.IconButton</item>
         <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="28">shortEdges</item>
     </style>
 </resources>

@@ -85,6 +85,13 @@ class Settings(context: Context) {
     /** Audio track (0-based among the movie's audio tracks) chosen for a movie; null = not chosen. */
     fun audioTrack(fingerprint: String): Int? = prefs.getInt("audio_track_$fingerprint", -1).takeIf { it >= 0 }
     fun setAudioTrack(fingerprint: String, ordinal: Int) = prefs.edit().putInt("audio_track_$fingerprint", ordinal).apply()
+    /** Drops everything remembered for one movie (its audio track choice). */
+    fun forgetMovie(fingerprint: String) = prefs.edit().remove("audio_track_$fingerprint").apply()
+
+    /** Landscape videos open rotated to landscape, full screen. */
+    var landscapeFullScreen: Boolean
+        get() = prefs.getBoolean("landscape_full_screen", true)
+        set(v) = prefs.edit().putBoolean("landscape_full_screen", v).apply()
 
     var subtitleSizeSp: Int
         get() = prefs.getInt("subtitle_size_sp", 20)

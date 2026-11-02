@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="role_primary">@color/dark_primary</color>
+    <color name="role_on_primary">@color/dark_on_primary</color>
+    <color name="role_primary_container">@color/dark_primary_container</color>
+    <color name="role_on_primary_container">@color/dark_on_primary_container</color>
+    <color name="role_secondary">@color/dark_secondary</color>
+    <color name="role_on_secondary">@color/dark_on_secondary</color>
+    <color name="role_secondary_container">@color/dark_secondary_container</color>
+    <color name="role_on_secondary_container">@color/dark_on_secondary_container</color>
+    <color name="role_tertiary">@color/dark_tertiary</color>
+    <color name="role_on_tertiary">@color/dark_on_tertiary</color>
+    <color name="role_tertiary_container">@color/dark_tertiary_container</color>
+    <color name="role_on_tertiary_container">@color/dark_on_tertiary_container</color>
+    <color name="role_error">@color/dark_error</color>
+    <color name="role_on_error">@color/dark_on_error</color>
+    <color name="role_error_container">@color/dark_error_container</color>
+    <color name="role_on_error_container">@color/dark_on_error_container</color>
+    <color name="role_background">@color/dark_background</color>
+    <color name="role_on_background">@color/dark_on_background</color>
+    <color name="role_surface">@color/dark_surface</color>
+    <color name="role_on_surface">@color/dark_on_surface</color>
+    <color name="role_surface_variant">@color/dark_surface_variant</color>
+    <color name="role_on_surface_variant">@color/dark_on_surface_variant</color>
+    <color name="role_outline">@color/dark_outline</color>
+    <color name="role_outline_variant">@color/dark_outline_variant</color>
+    <color name="role_surface_container_lowest">@color/dark_surface_container_lowest</color>
+    <color name="role_surface_container_low">@color/dark_surface_container_low</color>
+    <color name="role_surface_container">@color/dark_surface_container</color>
+    <color name="role_surface_container_high">@color/dark_surface_container_high</color>
+    <color name="role_surface_container_highest">@color/dark_surface_container_highest</color>
+    <color name="role_surface_dim">@color/dark_surface_dim</color>
+    <color name="role_surface_bright">@color/dark_surface_bright</color>
+    <color name="role_inverse_surface">@color/dark_inverse_surface</color>
+    <color name="role_inverse_on_surface">@color/dark_inverse_on_surface</color>
+    <color name="role_inverse_primary">@color/dark_inverse_primary</color>
+</resources>

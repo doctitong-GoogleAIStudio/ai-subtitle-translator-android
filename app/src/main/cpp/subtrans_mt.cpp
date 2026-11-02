@@ -6,12 +6,17 @@
 
 #include <jni.h>
 #include <android/log.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <memory>
+#include <streambuf>
 #include <string>
 #include <vector>
 
+#include <ctranslate2/models/model_reader.h>
 #include <ctranslate2/translator.h>
 
 // Internal CTranslate2 headers, only for logging which kernels were selected.
@@ -24,6 +29,85 @@ namespace {
 
 struct Handle {
     std::unique_ptr<ctranslate2::Translator> translator;
+};
+
+// Seekable input over [start, start + length) of an open file (CTranslate2 reads model.bin
+// with read, tellg and seekg), buffered in 1 MB blocks.
+class FdRangeBuf : public std::streambuf {
+public:
+    FdRangeBuf(int fd, off_t start, off_t length) : fd_(fd), start_(start), length_(length), buf_(1 << 20) {
+        setg(buf_.data(), buf_.data(), buf_.data());
+    }
+
+protected:
+    int_type underflow() override {
+        if (gptr() < egptr()) return traits_type::to_int_type(*gptr());
+        return fill(base_ + (egptr() - eback()));
+    }
+
+    pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode) override {
+        const off_t here = base_ + (gptr() - eback());
+        const off_t target = dir == std::ios_base::beg ? off : dir == std::ios_base::cur ? here + off : length_ + off;
+        if (target < 0 || target > length_) return pos_type(off_type(-1));
+        if (target >= base_ && target <= base_ + (egptr() - eback())) {
+            setg(eback(), eback() + (target - base_), egptr());
+        } else {
+            base_ = target;
+            setg(buf_.data(), buf_.data(), buf_.data());
+        }
+        return pos_type(target);
+    }
+
+    pos_type seekpos(pos_type pos, std::ios_base::openmode mode) override {
+        return seekoff(off_type(pos), std::ios_base::beg, mode);
+    }
+
+private:
+    int_type fill(off_t at) {
+        base_ = at;
+        char *b = buf_.data();
+        const auto want = static_cast<size_t>(std::min<off_t>(static_cast<off_t>(buf_.size()), length_ - at));
+        ssize_t n = 0;
+        while (want > 0 && (n = pread(fd_, b, want, start_ + at)) < 0 && errno == EINTR) {}
+        if (n <= 0) {
+            setg(b, b, b);
+            return traits_type::eof();
+        }
+        setg(b, b, b + n);
+        return traits_type::to_int_type(*gptr());
+    }
+
+    int fd_;
+    off_t start_, length_, base_ = 0;  // base_: position (within the range) of the buffer's first byte
+    std::vector<char> buf_;
+};
+
+class FdRangeStream : public std::istream {
+public:
+    FdRangeStream(int fd, off_t start, off_t length) : std::istream(nullptr), buf_(fd, start, length) { rdbuf(&buf_); }
+
+private:
+    FdRangeBuf buf_;
+};
+
+// model.bin is read in place from the APK; config and vocabulary come from the model folder.
+class ApkModelReader : public ctranslate2::models::ModelReader {
+public:
+    ApkModelReader(const std::string &dir, int fd, off_t start, off_t length)
+        : dir_(dir), files_(dir), fd_(fd), start_(start), length_(length) {}
+
+    std::string get_model_id() const override { return dir_; }
+
+    std::unique_ptr<std::istream> get_file(const std::string &filename, const bool binary) override {
+        if (filename == "model.bin") return std::make_unique<FdRangeStream>(fd_, start_, length_);
+        return files_.get_file(filename, binary);
+    }
+
+private:
+    std::string dir_;
+    ctranslate2::models::ModelFileReader files_;
+    int fd_;
+    off_t start_, length_;
 };
 
 void throw_java(JNIEnv *env, const char *message) {
@@ -62,7 +146,8 @@ jbyteArray join_tokens(JNIEnv *env, const std::vector<std::string> &tokens) {
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_aivicventures_subtitletranslator_translate_TranslatorNative_init(JNIEnv *env, jobject, jstring modelDir, jint threads) {
+Java_com_aivicventures_subtitletranslator_translate_TranslatorNative_init(
+    JNIEnv *env, jobject, jstring modelDir, jint threads, jint fd, jlong offset, jlong length) {
     const char *path = env->GetStringUTFChars(modelDir, nullptr);
     std::string dir(path);
     env->ReleaseStringUTFChars(modelDir, path);
@@ -70,8 +155,10 @@ Java_com_aivicventures_subtitletranslator_translate_TranslatorNative_init(JNIEnv
         ctranslate2::ReplicaPoolConfig config;
         config.num_threads_per_replica = static_cast<size_t>(threads > 0 ? threads : 1);
         auto t0 = std::chrono::steady_clock::now();
-        auto handle = new Handle{std::make_unique<ctranslate2::Translator>(
-            dir, ctranslate2::Device::CPU, ctranslate2::ComputeType::INT8, std::vector<int>{0}, false, config)};
+        ctranslate2::models::ModelLoader loader(std::make_shared<ApkModelReader>(dir, fd, offset, length));
+        loader.device = ctranslate2::Device::CPU;
+        loader.compute_type = ctranslate2::ComputeType::INT8;
+        auto handle = new Handle{std::make_unique<ctranslate2::Translator>(loader, config)};
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
         __android_log_print(ANDROID_LOG_INFO, TAG, "loaded %s in %lld ms, %d threads, isa=%s int8 gemm=%s", dir.c_str(),
                             static_cast<long long>(ms), threads, ctranslate2::cpu::isa_to_str(ctranslate2::cpu::get_cpu_isa()).c_str(),

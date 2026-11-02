@@ -107,4 +107,28 @@ class CacheDb(context: Context) : SQLiteOpenHelper(context, "cache.db", null, 1)
         db.execSQL("DELETE FROM segments WHERE profile_id IN (SELECT id FROM profiles WHERE movie_fp=?)", arrayOf(fp))
         db.execSQL("DELETE FROM coverage WHERE profile_id IN (SELECT id FROM profiles WHERE movie_fp=?)", arrayOf(fp))
     }
+
+    /** Takes a movie off the recent list; with [deleteSubtitles] its cached subtitles go too
+     *  (otherwise they are reused if the movie is opened again). */
+    fun removeMovie(fp: String, deleteSubtitles: Boolean) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (deleteSubtitles) {
+                clearMovie(fp)
+                db.delete("profiles", "movie_fp=?", arrayOf(fp))
+            }
+            db.delete("movies", "fingerprint=?", arrayOf(fp))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /** Seconds of the movie with subtitles, for its most complete pipeline / audio track. */
+    fun coveredSeconds(fp: String): Double =
+        readableDatabase.rawQuery(
+            "SELECT MAX(s) FROM (SELECT SUM(c.end_ - c.start) AS s FROM coverage c JOIN profiles p ON p.id = c.profile_id WHERE p.movie_fp=? GROUP BY p.id)",
+            arrayOf(fp),
+        ).use { if (it.moveToFirst() && !it.isNull(0)) it.getDouble(0) else 0.0 }
 }

@@ -20,6 +20,8 @@ licence texts ship inside the APK (`assets/licenses/`) and are shown in the app 
 | BS::thread_pool (Barak Shoshany), neon/avx mathfun headers (Julien Pommier; Giovanni Garberoglio; Marian NMT), avx512_mathfun (SIMD_Utils) | bundled in CTranslate2 | MIT; zlib; BSD-2-Clause | thread pool and vectorised math in CTranslate2 |
 | AndroidX Media3 (exoplayer, ui, inspector, common, extractor, decoder, container, datasource, database) | 1.11.1 | Apache-2.0 | video playback; demuxing audio for recognition (`MediaExtractorCompat`) |
 | AndroidX core-ktx, activity-ktx, lifecycle-runtime-ktx and their AndroidX dependencies (annotation, collection, savedstate, recyclerview, profileinstaller, startup, tracing, compose runtime-annotation, …) | see `gradle/libs.versions.toml` | Apache-2.0 | app framework |
+| Material Components for Android (Google) with AppCompat, ConstraintLayout core, CoordinatorLayout, CardView, DrawerLayout, ViewPager2, Transition, DynamicAnimation, Fragment, ResourceInspection and other AndroidX libraries it pulls in, plus Error Prone annotations | 1.14.0 | Apache-2.0 | Material 3 look: cards, buttons, switches, sliders, chips, dialogs, app bar |
+| Material Icons (Google): path data of 19 icons in `res/drawable/ic_*.xml` | — | Apache-2.0 | icons on the screens |
 | Kotlin standard library, kotlinx-coroutines, kotlinx-serialization-core (pulled in by AndroidX), JetBrains annotations | Kotlin (AGP 9.4.1 built-in), coroutines 1.11.0 | Apache-2.0 | language runtime, background work |
 | Guava (pulled in by Media3) with failureaccess, listenablefuture, JSpecify | per Media3 1.11.1 | Apache-2.0 | utility library used by Media3 |
 | FFmpeg (libavcodec, libavutil, libswresample) | 7.1.5, unmodified (see "FFmpeg" below) | LGPL 2.1 or later | AC-3, E-AC-3, DTS, TrueHD/MLP and MPEG audio decoders, used only when the phone has no decoder of its own |
@@ -29,7 +31,7 @@ licence texts ship inside the APK (`assets/licenses/`) and are shown in the app 
 The exact resolved dependency list of a build is printed by
 `gradlew :app:dependencies --configuration releaseRuntimeClasspath` (see `docs/dependencies-release.txt`).
 
-## Models (downloaded by the user in the Model Manager, never bundled)
+## Models (bundled in the APK)
 
 | Model | Source (pinned commit) | Licence |
 |---|---|---|
@@ -37,8 +39,10 @@ The exact resolved dependency list of a build is printed by
 | Silero VAD v6.2.0, ggml | `huggingface.co/ggml-org/whisper-vad` @ `9ffd54a1e1ee413ddf265af9913beaf518d1639b` | MIT (Silero Team) |
 | M2M100 418M, CTranslate2 int8 (model.bin, shared_vocabulary.json, config.json, sentencepiece.bpe.model) | `huggingface.co/jncraton/m2m100_418M-ct2-int8` @ `7c1b2620a4e58dacecbd8bf89cfd6da7eb9eb7b0` | MIT (Meta AI `facebook/m2m100_418M`; conversion by Jon Craton) |
 
-Each file's size and SHA-256 are in `app/src/main/assets/model_catalog.json`; a download is
-installed only if both match.
+Every model is redistributed inside the APK under its MIT licence; the licence texts are in
+`assets/licenses/` (`OpenAI-Whisper-MIT.txt`, `Silero-VAD-MIT.txt`, `M2M100-MIT.txt`). The
+build fetches each file from the pinned source above and stops unless its size and SHA-256
+match `app/src/main/assets/model_catalog.json` (`fetchModels` in `app/build.gradle.kts`).
 
 ## Considered and not used
 

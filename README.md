@@ -6,29 +6,33 @@ recognition, translation to English (M2M100 418M or Whisper's own translate task
 measured better for the chosen speech model), a look-ahead buffer that stays ahead of the
 playhead, a cache so a movie is never processed twice, SRT export, an audio track picker
 and optional LGPL FFmpeg decoders for AC-3, E-AC-3 and DTS soundtracks. No movie audio,
-subtitles or keys leave the device. The only network use is downloading models in the
-Model Manager.
+subtitles or keys leave the device. Every model is built into the app, so nothing is
+downloaded, and the app has no internet permission at all.
 
-Status: **Phase 3** (see [Phases](#phases)). Package `com.aivicventures.subtitletranslator`.
+Status: **version 1.0.0**, release build (see [Phases](#phases)). Package
+`com.aivicventures.subtitletranslator`.
 
 ## The APK
 
-`AI-Subtitle-Translator-universal.apk` in this folder is a universal build. It contains
-arm64-v8a, armeabi-v7a, x86_64 and x86, is about 25.7 MB (the FFmpeg decoders add 3.1 MB),
-and needs Android 8.0 (API 26) or later. It is signed with the Android debug key, which is fine for sideloading and testing.
-Use a real release key before any store upload.
+`AI-Subtitle-Translator-universal.apk` in this folder is the universal release build,
+version 1.0.0:
+- **Size:** about 805 MB, because every model is inside: Whisper tiny, base and small,
+  Silero VAD, and the M2M100 translator (778 MB together). The app itself is 26 MB.
+- **Phones:** arm64-v8a, armeabi-v7a, x86_64 and x86, Android 8.0 (API 26) or later.
+- **Free space:** installing needs well over 1 GB free, because Android keeps a reserve; an
+  emulator here refused it at 1.3 GB free. Once installed the models take no second copy,
+  because they are read straight from the APK.
+- **Signing:** signed with this project's own release key (see
+  [Release signing](#release-signing)), not the debug key.
+- **Upgrading from 0.1:** earlier builds were signed with the debug key, so Android will not
+  install 1.0 over them. Uninstall the old app first. This also clears its recent list and
+  saved subtitles, and the models it had downloaded.
 
 Install it with `adb install -r AI-Subtitle-Translator-universal.apk`, or by copying the
 file to the phone and opening it.
 
-First run:
-1. Open **Model Manager** and download a Whisper model and the Silero VAD (1 MB). Each
-   download is checked against its pinned size and SHA-256 before it is installed.
-   - Whisper base (60 MB) for mid-range phones.
-   - Whisper small (190 MB) for better accuracy on fast phones.
-   - Optional: M2M100 418M translator (496 MB, 64-bit phones only). It makes translations
-     from Whisper tiny and base much better (see [Test results](#test-results-honest)).
-2. Tap **Open a video…**, then press Play when the readiness gate says the buffer is ready.
+Use: tap **Open a video**, pick a file, and playback starts by itself once enough subtitles
+are ready. There is nothing to download or set up first.
 
 ## Using it
 
@@ -37,6 +41,19 @@ First run:
   - Balanced: 10 s ahead (default).
   - High Accuracy: 30, 45 or 60 s ahead, with temperature fallback.
   - Full Movie: processes everything first.
+- **Full screen**: widescreen videos open rotated to landscape and fill the screen
+  (Settings, Player, on by default). The full-screen button in the player's controls
+  switches between landscape and portrait. **Fill** in the top bar crops the picture to
+  cover the whole screen; **Fit** shows all of it again.
+- **Recent movies**: tap a movie to continue where you stopped. The card shows how far you
+  watched and how much of it has subtitles. Its **⋮** menu has:
+  - **Play from the beginning**.
+  - **Remove from list**: the subtitles are kept, so opening the movie again is instant.
+  - **Delete saved subtitles**: removes the movie from the list and deletes its subtitles
+    and its audio track choice.
+  - Neither touches the video file itself.
+- **Built-in models** (menu): lists the models in the app, their size and licence, and which
+  speech model this phone uses automatically (by its memory).
 - **Readiness gate**: playback starts once the target amount of subtitles is ready. Press
   **Play now** to skip the wait.
 - **Low buffer**: when the buffer runs low, the engine switches to catch-up mode (no
@@ -78,7 +95,7 @@ First run:
     with small. This follows the FLEURS results below.
   - M2M100 always.
   - Whisper only: no extra model, fastest.
-  - Without the M2M100 download, or on a 32-bit phone, Whisper translates.
+  - On a 32-bit phone, Whisper translates (M2M100 needs a 64-bit phone).
   - Each choice has its own cache, so lines from the two translators are never mixed.
 
 ## Building
@@ -92,6 +109,27 @@ export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
 ```
 
 The output is `app/build/outputs/apk/release/app-release.apk`.
+
+The first build downloads the models (778 MB) into `bundled-models/` (git-ignored, kept
+across clean builds):
+- The `fetchModels` task in `app/build.gradle.kts` reads `assets/model_catalog.json`.
+- Every file comes from a URL pinned to a Hugging Face commit, and the build stops unless
+  its size and SHA-256 match.
+- The models are packaged uncompressed (`noCompress "bin"`), so whisper.cpp and CTranslate2
+  read them in place through a file descriptor and offset (`cpp/subtrans_jni.cpp`,
+  `cpp/subtrans_mt.cpp`). Only the small files (Silero VAD, M2M100's vocabulary, config and
+  tokenizer, 6 MB) are copied to app storage on first use.
+
+### Release signing
+
+The release build is signed with the key in `signing/release.jks`. Its passwords are in
+`keystore.properties` in the project root. Both are git-ignored and exist only on this PC.
+- **Back up both files** somewhere safe. Without them no update can ever be installed over
+  this app; it would have to be uninstalled first.
+- Without `keystore.properties` the release build falls back to the debug key, so a fresh
+  clone still builds.
+- Certificate: `CN=AI Subtitle Translator, O=aivicventures`, RSA 4096, valid 30 years,
+  SHA-256 `dbad8165507ccf44368333ec69de2c3e404adc18f6f01b03e3d93f3d1bed99d9`.
 
 The FFmpeg decoders are optional and built separately, once (about 25 minutes on this PC):
 
@@ -138,8 +176,8 @@ it and is force-included.
 | Look-ahead | `buffering/LookAheadEngine.kt`, `Coverage.kt` | Port of the Windows engine (details below this table). |
 | Cache | `cache/CacheDb.kt` | Tables: movies, profiles, segments, coverage. |
 | Subtitles | `subtitles/Layout.kt`, `Subtitles.kt` | Port of the Windows layout rules: 2 × 42 characters, ≤ 20 characters per second, ≤ 7 s per cue. SRT writer. |
-| Models | `models/ModelManager.kt`, `assets/model_catalog.json` | Pinned Hugging Face commits, SHA-256 checked, resumable downloads. Default model chosen by device RAM. |
-| UI | `ui/` | Main, Player (Media3 ExoPlayer + subtitle overlay), Model Manager, Settings, About & licences. |
+| Models | `models/ModelManager.kt`, `assets/model_catalog.json` | All bundled in the APK (fetched and SHA-256 checked at build time). Weights read in place from the APK; default speech model chosen by device RAM. |
+| UI | `ui/` | Material 3 (Material Components 1.14), light and dark, brand colours. Main (recent movies with remove/delete), Player (Media3 ExoPlayer + subtitle overlay, landscape full screen, fit/fill), Built-in models, Settings, About & licences. |
 
 Native ASR details:
 - ggml CPU backends are loaded at runtime.
@@ -390,7 +428,7 @@ decides.
      10× slower per token; see THIRD_PARTY_NOTICES.md.
    - Per-language quality comparison against the Whisper translate task (above).
    - Automatic translator choice per speech model.
-3. **Phase 3 (this build)**:
+3. **Phase 3** (done):
    - Audio track picker, remembered per movie, used for playback and recognition.
    - Optional LGPL-only FFmpeg decoders (AC-3, E-AC-3, DTS, TrueHD, MPEG audio) for
      recognition, and Media3's FFmpeg extension for playback, with build-time and run-time
@@ -399,16 +437,23 @@ decides.
      saver that also follows Power Saver, low battery and heat.
    - No real phone was available, so the tuning is implemented and shown to take effect,
      but not measured.
-4. **Next: real-phone measurements**:
+4. **Version 1.0.0 (this build)**:
+   - Every model built into the APK, no downloads and no internet permission.
+   - Landscape full screen with fit/fill, remove and delete in Recent movies, and a
+     Material 3 look with a new launcher icon (themed icon on Android 13+).
+   - Release key instead of the debug key.
+5. **Next: real-phone measurements**:
    - Follow [docs/real-device-test-plan.md](docs/real-device-test-plan.md) on one or more
      phones, then adjust the defaults from the results.
 
 ## Privacy and licences
 
-- No analytics, no accounts, no backups (`allowBackup=false`). The only permission is
-  INTERNET, used for model downloads.
+- No analytics, no accounts, no backups (`allowBackup=false`) and **no permissions**: not
+  even INTERNET (the network permissions Media3 declares are removed from the manifest).
 - If a cloud feature is ever added, it will be off by default, and its key will be stored
   with Android Keystore.
+- The models are redistributed in the APK under their MIT licences, which are shown in the
+  app.
 - Every dependency is MIT, Apache-2.0, BSD-2-Clause or zlib, except FFmpeg's decoders, which
   are LGPL 2.1 or later. They are kept as separate shared libraries that can be replaced,
   and their source (`ffmpeg-7.1.5.tar.xz`, kept next to the APK) must be shared along with

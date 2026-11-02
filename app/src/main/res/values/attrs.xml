@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Button styles for buttons built in code (MaterialButton takes a style attribute). -->
+    <attr name="appTonalButtonStyle" format="reference" />
+    <attr name="appTextButtonStyle" format="reference" />
+    <attr name="appOutlinedButtonStyle" format="reference" />
+    <attr name="appIconButtonStyle" format="reference" />
+</resources>

@@ -28,7 +28,8 @@ object WhisperNative {
 
     external fun loadBackends(dir: String)
     external fun systemInfo(): String
-    external fun initContext(modelPath: String): Long
+    /** Loads a model from [length] bytes at [offset] of the open file [fd] (the APK). */
+    external fun initContext(fd: Int, offset: Long, length: Long): Long
     external fun freeContext(ptr: Long)
     external fun requestAbort(ptr: Long)
     external fun clearAbort(ptr: Long)

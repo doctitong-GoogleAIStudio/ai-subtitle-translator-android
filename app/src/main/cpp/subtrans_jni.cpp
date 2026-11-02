@@ -6,7 +6,9 @@
 #include <jni.h>
 #include <android/log.h>
 #include <sched.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -55,6 +57,36 @@ std::string jstring_to_std(JNIEnv *env, jstring s) {
     return out;
 }
 
+// whisper.cpp model loader over [start, start + length) of an open file: the models are
+// stored uncompressed in the APK and read in place, so they are never copied to storage.
+struct FdRange {
+    int fd;
+    int64_t start;
+    int64_t length;
+    int64_t pos;
+};
+
+size_t range_read(void *ctx, void *output, size_t read_size) {
+    auto *r = static_cast<FdRange *>(ctx);
+    const size_t n = std::min<size_t>(read_size, static_cast<size_t>(r->length - r->pos));
+    size_t done = 0;
+    while (done < n) {
+        const ssize_t k = pread(r->fd, static_cast<char *>(output) + done, n - done, r->start + r->pos + static_cast<int64_t>(done));
+        if (k < 0 && errno == EINTR) continue;
+        if (k <= 0) break;
+        done += static_cast<size_t>(k);
+    }
+    r->pos += static_cast<int64_t>(done);
+    return done;
+}
+
+bool range_eof(void *ctx) {
+    auto *r = static_cast<FdRange *>(ctx);
+    return r->pos >= r->length;
+}
+
+void range_close(void *) {}  // the Kotlin side owns the file descriptor
+
 jbyteArray bytes(JNIEnv *env, const char *text) {
     const auto n = static_cast<jsize>(text ? strlen(text) : 0);
     jbyteArray arr = env->NewByteArray(n);
@@ -80,14 +112,15 @@ Java_com_aivicventures_subtitletranslator_asr_WhisperNative_systemInfo(JNIEnv *e
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_aivicventures_subtitletranslator_asr_WhisperNative_initContext(JNIEnv *env, jobject, jstring model_path) {
-    const std::string path = jstring_to_std(env, model_path);
+Java_com_aivicventures_subtitletranslator_asr_WhisperNative_initContext(JNIEnv *, jobject, jint fd, jlong offset, jlong length) {
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = false;
     cparams.flash_attn = true;
-    whisper_context *ctx = whisper_init_from_file_with_params(path.c_str(), cparams);
+    FdRange range{fd, offset, length, 0};
+    whisper_model_loader loader{&range, range_read, range_eof, range_close};
+    whisper_context *ctx = whisper_init_with_params(&loader, cparams);
     if (ctx == nullptr) {
-        LOGE("failed to load model %s", path.c_str());
+        LOGE("failed to load model (fd %d, offset %lld, %lld bytes)", fd, static_cast<long long>(offset), static_cast<long long>(length));
         return 0;
     }
     auto *h = new Handle();

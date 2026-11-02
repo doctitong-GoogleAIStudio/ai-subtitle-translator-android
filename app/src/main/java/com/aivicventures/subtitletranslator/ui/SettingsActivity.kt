@@ -1,120 +1,104 @@
 package com.aivicventures.subtitletranslator.ui
 
 import android.os.Bundle
-import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.ScrollView
-import android.widget.SeekBar
-import android.widget.Spinner
-import android.widget.Switch
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.device.CpuTopology
 import com.aivicventures.subtitletranslator.settings.Languages
-import com.aivicventures.subtitletranslator.translate.TranslatorNative
 import com.aivicventures.subtitletranslator.settings.Mode
+import com.aivicventures.subtitletranslator.translate.TranslatorNative
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.slider.Slider
+import com.google.android.material.slider.TickVisibilityMode
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val s = app.settings
-        val col = column()
+        val col = scaffold(getString(R.string.settings_title)).content
 
-        col.addFull(heading(getString(R.string.setting_mode)))
-        col.addFull(body(getString(R.string.setting_mode_help)))
-        col.addFull(spinner(Mode.entries.map { it.label }, Mode.entries.indexOf(s.mode)) { s.mode = Mode.entries[it] })
-
-        col.addFull(heading(getString(R.string.setting_model)))
-        val asr = app.models.catalog.filter { it.kind == "asr" }
-        val options = listOf(getString(R.string.setting_model_auto)) + asr.map { it.name + if (app.models.isInstalled(it)) "" else " (not installed)" }
-        val selected = asr.indexOfFirst { it.id == s.asrModel } + 1
-        col.addFull(spinner(options, selected) { s.asrModel = if (it == 0) "" else asr[it - 1].id })
-
-        col.addFull(heading(getString(R.string.setting_translator)))
-        col.addFull(body(getString(
-            when {
-                !TranslatorNative.available -> R.string.setting_translator_32bit
-                app.models.translationModel() == null -> R.string.setting_translator_missing
-                else -> R.string.setting_translator_help
-            },
-        )))
-        val engines = listOf("auto", "m2m100", "whisper")
-        col.addFull(spinner(listOf(getString(R.string.translator_auto), getString(R.string.translator_m2m100), getString(R.string.translator_whisper)),
-            engines.indexOf(s.translator).coerceAtLeast(0)) { s.translator = engines[it] })
-
-        col.addFull(heading(getString(R.string.setting_language)))
-        col.addFull(body(getString(R.string.setting_language_help)))
-        val langs = Languages.choices
-        col.addFull(spinner(langs.map { it.second }, langs.indexOfFirst { it.first == s.sourceLanguage }.coerceAtLeast(0)) { s.sourceLanguage = langs[it].first })
-
-        col.addFull(heading(getString(R.string.setting_threads)))
-        val threadsLabel = body()
-        fun showThreads() { threadsLabel.text = getString(R.string.setting_threads_value, s.threads, Runtime.getRuntime().availableProcessors()) }
-        showThreads()
-        col.addFull(threadsLabel)
-        col.addFull(SeekBar(this).apply {
-            max = 7
-            progress = s.threads - 1
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { if (fromUser) { s.threads = p + 1; showThreads() } }
-                override fun onStartTrackingTouch(sb: SeekBar) = Unit
-                override fun onStopTrackingTouch(sb: SeekBar) = Unit
-            })
+        col.addFull(sectionTitle(getString(R.string.settings_subtitles)))
+        col.addFull(card(16) {
+            addFull(choice(getString(R.string.setting_mode), Mode.entries.map { it.label }, Mode.entries.indexOf(s.mode),
+                getString(R.string.setting_mode_help)) { s.mode = Mode.entries[it] })
+            val langs = Languages.choices
+            addFull(choice(getString(R.string.setting_language), langs.map { it.second },
+                langs.indexOfFirst { it.first == s.sourceLanguage }.coerceAtLeast(0), getString(R.string.setting_language_help)) { s.sourceLanguage = langs[it].first })
+            addFull(slider(getString(R.string.setting_size), 12, 40, s.subtitleSizeSp, { getString(R.string.setting_size_value, it) }) { s.subtitleSizeSp = it })
+            addFull(switchRow(getString(R.string.setting_pause_low), null, s.pauseOnLowBuffer) { s.pauseOnLowBuffer = it })
+            addFull(switchRow(getString(R.string.setting_continue), null, s.continueWholeMovie) { s.continueWholeMovie = it })
         })
 
-        col.addFull(Switch(this).apply {
-            text = getString(R.string.setting_fast_cores, CpuTopology.fastCores.size, CpuTopology.coreCount)
-            isChecked = s.fastCoresOnly
-            isEnabled = CpuTopology.heterogeneous
-            setOnCheckedChangeListener { _, v -> s.fastCoresOnly = v }
-        })
-        col.addFull(body(getString(if (CpuTopology.heterogeneous) R.string.setting_fast_cores_help else R.string.setting_fast_cores_uniform)))
-        col.addFull(Switch(this).apply {
-            text = getString(R.string.setting_battery_saver)
-            isChecked = s.batterySaver
-            setOnCheckedChangeListener { _, v -> s.batterySaver = v }
-        })
-        col.addFull(body(getString(R.string.setting_battery_saver_help)))
-
-        col.addFull(heading(getString(R.string.setting_size)))
-        val sizeLabel = body(getString(R.string.setting_size_value, s.subtitleSizeSp))
-        col.addFull(sizeLabel)
-        col.addFull(SeekBar(this).apply {
-            max = 28
-            progress = s.subtitleSizeSp - 12
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    if (fromUser) { s.subtitleSizeSp = p + 12; sizeLabel.text = getString(R.string.setting_size_value, s.subtitleSizeSp) }
-                }
-                override fun onStartTrackingTouch(sb: SeekBar) = Unit
-                override fun onStopTrackingTouch(sb: SeekBar) = Unit
-            })
+        col.addFull(sectionTitle(getString(R.string.settings_engine)))
+        col.addFull(card(16) {
+            val asr = app.models.catalog.filter { it.kind == "asr" }
+            val auto = app.models.chooseAsr("")
+            val options = listOf(getString(R.string.setting_model_auto, auto?.name ?: "-")) + asr.map { it.name }
+            addFull(choice(getString(R.string.setting_model), options, asr.indexOfFirst { it.id == s.asrModel } + 1,
+                getString(R.string.setting_model_help)) { s.asrModel = if (it == 0) "" else asr[it - 1].id })
+            val engines = listOf("auto", "m2m100", "whisper")
+            val help = getString(if (!TranslatorNative.available) R.string.setting_translator_32bit else R.string.setting_translator_help)
+            addFull(choice(getString(R.string.setting_translator),
+                listOf(getString(R.string.translator_auto), getString(R.string.translator_m2m100), getString(R.string.translator_whisper)),
+                engines.indexOf(s.translator).coerceAtLeast(0), help) { s.translator = engines[it] })
         })
 
-        col.addFull(Switch(this).apply {
-            text = getString(R.string.setting_pause_low)
-            isChecked = s.pauseOnLowBuffer
-            setOnCheckedChangeListener { _, v -> s.pauseOnLowBuffer = v }
-        })
-        col.addFull(Switch(this).apply {
-            text = getString(R.string.setting_continue)
-            isChecked = s.continueWholeMovie
-            setOnCheckedChangeListener { _, v -> s.continueWholeMovie = v }
+        col.addFull(sectionTitle(getString(R.string.settings_performance)))
+        col.addFull(card(16) {
+            val cores = Runtime.getRuntime().availableProcessors()
+            addFull(slider(getString(R.string.setting_threads), 1, 8, s.threads, { getString(R.string.setting_threads_value, it, cores) }) { s.threads = it })
+            addFull(switchRow(
+                getString(R.string.setting_fast_cores, CpuTopology.fastCores.size, CpuTopology.coreCount),
+                getString(if (CpuTopology.heterogeneous) R.string.setting_fast_cores_help else R.string.setting_fast_cores_uniform),
+                s.fastCoresOnly, CpuTopology.heterogeneous,
+            ) { s.fastCoresOnly = it })
+            addFull(switchRow(getString(R.string.setting_battery_saver), getString(R.string.setting_battery_saver_help), s.batterySaver) { s.batterySaver = it })
         })
 
-        val scroll = ScrollView(this).apply { addView(col) }
-        scroll.padForSystemBars()
-        setContentView(scroll)
+        col.addFull(sectionTitle(getString(R.string.settings_player)))
+        col.addFull(card(16) {
+            addFull(switchRow(getString(R.string.setting_landscape), getString(R.string.setting_landscape_help), s.landscapeFullScreen) { s.landscapeFullScreen = it })
+        })
     }
 
-    private fun spinner(items: List<String>, selected: Int, onSelect: (Int) -> Unit): Spinner = Spinner(this).apply {
-        adapter = ArrayAdapter(this@SettingsActivity, android.R.layout.simple_spinner_dropdown_item, items)
-        setSelection(selected.coerceIn(0, items.size - 1), false)
-        onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = onSelect(position)
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+    /** A row showing the current choice; tapping opens a single-choice dialog. */
+    private fun choice(title: String, items: List<String>, selected: Int, help: String?, onSelect: (Int) -> Unit): LinearLayout {
+        var current = selected.coerceIn(0, items.size - 1)
+        return choiceRow(title, items[current], help) { valueView: TextView ->
+            MaterialAlertDialogBuilder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(items.toTypedArray(), current) { dialog, which ->
+                    current = which
+                    valueView.text = items[which]
+                    onSelect(which)
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
+    }
+
+    private fun slider(title: String, from: Int, to: Int, value: Int, label: (Int) -> String, onChange: (Int) -> Unit): LinearLayout {
+        val valueView = body(label(value))
+        return stack(
+            row(null, stack(rowTitle(title)), valueView),
+            Slider(this).apply {
+                valueFrom = from.toFloat()
+                valueTo = to.toFloat()
+                stepSize = 1f
+                tickVisibilityMode = TickVisibilityMode.TICK_VISIBILITY_HIDDEN
+                this.value = value.coerceIn(from, to).toFloat()
+                setLabelFormatter { label(it.toInt()) }
+                addOnChangeListener { _, v, fromUser ->
+                    if (fromUser) {
+                        onChange(v.toInt())
+                        valueView.text = label(v.toInt())
+                    }
+                }
+            },
+        ).apply { setPadding(0, dp(10), 0, 0) }
     }
 }

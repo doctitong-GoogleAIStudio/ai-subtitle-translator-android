@@ -1,75 +1,47 @@
 package com.aivicventures.subtitletranslator.ui
 
 import android.os.Bundle
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.lifecycle.lifecycleScope
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
-import com.aivicventures.subtitletranslator.models.ModelSpec
-import com.aivicventures.subtitletranslator.models.ModelState
-import kotlinx.coroutines.launch
+import com.aivicventures.subtitletranslator.translate.TranslatorNative
+import com.google.android.material.R as M
+import com.google.android.material.chip.Chip
 
-/** Model Manager: download (pinned URL + SHA-256), cancel, delete. */
+/** Built-in models: every model ships in the APK, so this screen only explains them. */
 class ModelsActivity : ComponentActivity() {
-    private val rows = mutableMapOf<String, Pair<TextView, Button>>()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val col = scaffold(getString(R.string.models_title)).content
         val m = app.models
-        val col = column()
-        col.addFull(body(getString(R.string.models_intro, m.deviceMemoryMb())))
-        for (spec in m.catalog) {
-            col.addFull(heading(spec.name))
-            col.addFull(body("${spec.description}\n${formatSize(spec.size)} · ${spec.license}"))
-            val state = body()
-            val action = Button(this).apply { isAllCaps = false }
-            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            line.addView(action)
-            line.addView(state, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(12) })
-            col.addFull(line)
-            rows[spec.id] = state to action
-        }
-        val scroll = ScrollView(this).apply { addView(col) }
-        scroll.padForSystemBars()
-        setContentView(scroll)
-
-        lifecycleScope.launch {
-            m.states.collect { states -> for (spec in m.catalog) render(spec, states[spec.id] ?: ModelState.NotInstalled) }
-        }
-    }
-
-    private fun render(spec: ModelSpec, s: ModelState) {
-        val (state, action) = rows[spec.id] ?: return
-        val m = app.models
-        when (s) {
-            ModelState.NotInstalled -> {
-                state.text = getString(R.string.state_not_installed)
-                action.text = getString(R.string.download)
-                action.setOnClickListener { m.download(spec) }
-            }
-            is ModelState.Downloading -> {
-                state.text = getString(R.string.state_downloading, 100.0 * s.bytes / s.total.coerceAtLeast(1), formatSize(s.bytes), formatSize(s.total))
-                action.text = getString(R.string.cancel)
-                action.setOnClickListener { m.cancel(spec) }
-            }
-            ModelState.Verifying -> {
-                state.text = getString(R.string.state_verifying)
-                action.text = getString(R.string.cancel)
-                action.setOnClickListener { m.cancel(spec) }
-            }
-            ModelState.Installed -> {
-                state.text = getString(R.string.state_installed)
-                action.text = getString(R.string.delete)
-                action.setOnClickListener { m.delete(spec) }
-            }
-            is ModelState.Failed -> {
-                state.text = getString(R.string.state_failed, s.message)
-                action.text = getString(R.string.retry)
-                action.setOnClickListener { m.download(spec) }
+        val auto = m.chooseAsr("")
+        col.addFull(card(16, M.attr.colorSecondaryContainer) {
+            addView(row(iconBadge(R.drawable.ic_check, M.attr.colorSecondary, M.attr.colorOnSecondary), stack(
+                heading(getString(R.string.models_included)).apply { setTextColor(themeColor(M.attr.colorOnSecondaryContainer)) },
+                body(getString(R.string.models_intro, "%.1f".format(m.deviceMemoryMb() / 1024.0), auto?.name ?: "-"))
+                    .apply { setTextColor(themeColor(M.attr.colorOnSecondaryContainer)) },
+            )))
+        }, 8)
+        for ((kind, title) in listOf("asr" to R.string.models_speech, "vad" to R.string.models_vad, "mt" to R.string.models_translation)) {
+            col.addFull(sectionTitle(getString(title)))
+            for (spec in m.catalog.filter { it.kind == kind }) {
+                val status = when {
+                    !m.isInstalled(spec) -> getString(R.string.model_missing)
+                    kind == "mt" && !TranslatorNative.available -> getString(R.string.model_needs_64bit)
+                    spec.id == auto?.id -> getString(R.string.model_auto)
+                    else -> getString(R.string.model_included)
+                }
+                col.addFull(card {
+                    val icon = when (kind) { "asr" -> R.drawable.ic_audio; "mt" -> R.drawable.ic_translate; else -> R.drawable.ic_memory }
+                    addView(row(iconBadge(icon), stack(heading(spec.name), caption("${formatSize(spec.size)} · ${spec.license}"))))
+                    addFull(body(spec.description), 10)
+                    addView(Chip(context).apply {
+                        text = status
+                        isClickable = false
+                        setChipIconResource(R.drawable.ic_check)
+                        isChipIconVisible = m.isInstalled(spec)
+                    }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+                }, 8)
             }
         }
     }
