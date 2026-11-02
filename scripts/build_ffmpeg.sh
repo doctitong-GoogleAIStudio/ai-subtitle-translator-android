@@ -107,4 +107,6 @@ build arm64-v8a aarch64 armv8-a aarch64-linux-android
 build armeabi-v7a arm armv7-a armv7a-linux-androideabi --extra-cflags="-march=armv7-a -mfloat-abi=softfp"
 build x86_64 x86_64 x86-64 x86_64-linux-android --disable-x86asm
 build x86 x86 i686 i686-linux-android --disable-asm
-echo "FFmpeg $VERSION ($DECODERS) built into $OUT"
+# The release build packs this tarball into the APK (LGPL source next to the libraries).
+cp "$TARBALL" "$ROOT/"
+echo "FFmpeg $VERSION ($DECODERS) built into $OUT; source tarball copied to $ROOT"

@@ -76,7 +76,10 @@ General Public License, version 2.1 or later; its text ships as
   with `scripts/build_ffmpeg.sh`, or drop your `.so` files into
   `app/src/main/ffmpeg/jniLibs/<abi>/` and run `gradlew :app:assembleRelease`. The app's
   source is in this repository, so it can be rebuilt against a modified FFmpeg.
-- Whoever distributes this APK must also make the FFmpeg source above available, for example
-  by sharing `ffmpeg-7.1.5.tar.xz` (kept next to the APK in the project folder) together with it.
+- The source ships inside the APK, so sharing the APK also shares it:
+  `assets/source/ffmpeg-7.1.5-source.zip` holds the unmodified tarball above, the build script
+  and the configure line of each ABI (`ffmpegSource` in `app/build.gradle.kts`, which checks
+  the tarball's SHA-256). In the app, **About & licences → Save FFmpeg source code** copies it
+  to a folder of your choice.
 - Patents: AC-3, E-AC-3 and DTS are covered by patents in some countries. The LGPL does not
   grant patent rights; check the rules where you distribute the app.

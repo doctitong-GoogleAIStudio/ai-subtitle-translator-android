@@ -86,8 +86,11 @@
     <string name="about_cpu">whisper.cpp and CTranslate2 run on the phone\'s processor, using its %1$s instructions.</string>
     <string name="about_cpu_plain">whisper.cpp and CTranslate2 run on the phone\'s processor.</string>
     <string name="about_ffmpeg_title">Extra audio decoders</string>
-    <string name="about_ffmpeg">AC-3, E-AC-3, DTS and TrueHD through FFmpeg %1$s, used only when the phone has no decoder of its own. These libraries are replaceable; see the FFmpeg section of the notices.</string>
+    <string name="about_ffmpeg">AC-3, E-AC-3, DTS and TrueHD through FFmpeg %1$s, used only when the phone has no decoder of its own. These libraries are replaceable, and their source code is included in the app; see the FFmpeg section of the notices.</string>
     <string name="about_ffmpeg_none">Not included in this build, so AC-3 and DTS play only if the phone decodes them.</string>
+    <string name="about_ffmpeg_source">Save FFmpeg source code (%1$s)</string>
+    <string name="about_ffmpeg_saved">FFmpeg source code saved.</string>
+    <string name="about_ffmpeg_save_failed">Could not save the file.</string>
     <string name="licences">Licences</string>
     <string name="licence_open">Read</string>
     <string name="licence_notices">Third-party notices</string>

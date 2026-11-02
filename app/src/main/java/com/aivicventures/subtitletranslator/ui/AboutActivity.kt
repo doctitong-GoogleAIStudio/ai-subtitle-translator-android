@@ -6,16 +6,39 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import com.aivicventures.subtitletranslator.BuildConfig
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.asr.WhisperNative
 import com.aivicventures.subtitletranslator.audio.FfmpegAudio
 import com.google.android.material.R as M
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Version, privacy note, engine details and every third-party licence (assets/licenses). */
 class AboutActivity : ComponentActivity() {
+    /** FFmpeg's LGPL source (assets/source/ffmpeg-<version>-source.zip), absent in builds without FFmpeg. */
+    private val ffmpegSource by lazy { assets.list("source").orEmpty().firstOrNull { it.startsWith("ffmpeg-") && it.endsWith(".zip") } }
+
+    // The system file picker chooses where the copy goes, so no storage permission is needed.
+    private val saveSource = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val file = ffmpegSource
+        if (uri == null || file == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    contentResolver.openOutputStream(uri)!!.use { out -> assets.open("source/$file").use { it.copyTo(out, 1 shl 20) } }
+                }.isSuccess
+            }
+            Toast.makeText(this@AboutActivity, if (ok) R.string.about_ffmpeg_saved else R.string.about_ffmpeg_save_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val col = scaffold(getString(R.string.about_title)).content
@@ -46,6 +69,12 @@ class AboutActivity : ComponentActivity() {
                 heading(getString(R.string.about_ffmpeg_title)),
                 caption(FfmpegAudio.description?.let { getString(R.string.about_ffmpeg, it) } ?: getString(R.string.about_ffmpeg_none)),
             )), 12)
+            ffmpegSource?.let { file ->
+                val size = runCatching { assets.openFd("source/$file").use { it.length } }.getOrNull()
+                addFull(tonalButton(getString(R.string.about_ffmpeg_source, size?.let(::formatSize) ?: "zip"), R.drawable.ic_download) {
+                    saveSource.launch(file)
+                }, 12)
+            }
         })
 
         col.addFull(sectionTitle(getString(R.string.licences)))

@@ -8,6 +8,7 @@ plugins {
 }
 
 val bundledModels = rootProject.layout.projectDirectory.dir("bundled-models")
+val ffmpegSourceDir = layout.buildDirectory.dir("generated/ffmpegSource").get().asFile
 
 android {
     namespace = "com.aivicventures.subtitletranslator"
@@ -68,10 +69,13 @@ android {
     buildFeatures { buildConfig = true }
     // Optional LGPL FFmpeg shared libraries from scripts/build_ffmpeg.sh (git-ignored).
     sourceSets.getByName("main").jniLibs.srcDir("src/main/ffmpeg/jniLibs")
+    // ...and their LGPL source (assets/source, from ffmpegSource below).
+    sourceSets.getByName("main").assets.srcDir(ffmpegSourceDir)
     // Every model of the catalog ships in the APK (assets/models, from fetchModels below).
     sourceSets.getByName("main").assets.srcDir(bundledModels.dir("assets"))
-    // Stored uncompressed so whisper.cpp and CTranslate2 read the weights in place from the APK.
-    androidResources { noCompress += "bin" }
+    // Stored uncompressed so whisper.cpp and CTranslate2 read the weights in place from the APK
+    // (and the already compressed FFmpeg source zip is not compressed a second time).
+    androidResources { noCompress += listOf("bin", "zip") }
 }
 
 // Fetches every model in assets/model_catalog.json from its pinned URL into
@@ -105,12 +109,7 @@ val fetchModels by tasks.registering {
                     target.delete()
                     check(part.renameTo(target)) { "could not write $target" }
                 }
-                val md = MessageDigest.getInstance("SHA-256")
-                target.inputStream().use { input ->
-                    val buf = ByteArray(1 shl 20)
-                    while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
-                }
-                val actual = md.digest().joinToString("") { "%02x".format(it) }
+                val actual = sha256(target)
                 if (target.length() != size || actual != sha) {
                     target.delete()
                     error("${target.name}: checksum mismatch (got $actual), removed; run the build again")
@@ -122,6 +121,39 @@ val fetchModels by tasks.registering {
     }
 }
 tasks.named("preBuild") { dependsOn(fetchModels) }
+
+fun sha256(f: File): String {
+    val md = MessageDigest.getInstance("SHA-256")
+    f.inputStream().use { input ->
+        val buf = ByteArray(1 shl 20)
+        while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+    }
+    return md.digest().joinToString("") { "%02x".format(it) }
+}
+
+// FFmpeg is LGPL, so its source ships inside the APK next to the libraries built from it:
+// assets/source/ffmpeg-<version>-source.zip holds the unmodified release tarball (project root,
+// SHA-256 checked against scripts/build_ffmpeg.sh), the configure line of each ABI and the
+// build script. The About screen saves a copy. Builds without the FFmpeg libraries skip it.
+val ffmpegSource by tasks.registering(Zip::class) {
+    val script = rootProject.file("scripts/build_ffmpeg.sh")
+    val vars = script.readLines().filter { Regex("^[A-Z0-9_]+=").containsMatchIn(it) }
+        .associate { it.substringBefore('=') to it.substringAfter('=') }
+    val version = vars.getValue("VERSION")
+    val tarball = rootProject.file("ffmpeg-$version.tar.xz")
+    val libs = fileTree("src/main/ffmpeg/jniLibs") { include("**/*.so") }
+    onlyIf { !libs.isEmpty }
+    archiveFileName.set("ffmpeg-$version-source.zip")
+    destinationDirectory.set(File(ffmpegSourceDir, "source"))
+    from(tarball)
+    from(script)
+    from("src/main/ffmpeg") { include("configuration-*.txt", "README-source.txt") }
+    doFirst {
+        check(tarball.isFile) { "${tarball.name} is missing from the project root: the FFmpeg libraries are LGPL and their source must ship with them (scripts/build_ffmpeg.sh downloads it)" }
+        check(sha256(tarball) == vars.getValue("SHA256")) { "${tarball.name}: checksum mismatch with scripts/build_ffmpeg.sh" }
+    }
+}
+tasks.named("preBuild") { dependsOn(ffmpegSource) }
 
 // The About screen shows the same notices file as the repository root.
 val copyNotices by tasks.registering(Copy::class) {

@@ -16,8 +16,9 @@ Status: **version 1.0.0**, release build (see [Phases](#phases)). Package
 
 `AI-Subtitle-Translator-universal.apk` in this folder is the universal release build,
 version 1.0.0:
-- **Size:** about 805 MB, because every model is inside: Whisper tiny, base and small,
-  Silero VAD, and the M2M100 translator (778 MB together). The app itself is 26 MB.
+- **Size:** about 816 MB, because every model is inside: Whisper tiny, base and small,
+  Silero VAD, and the M2M100 translator (778 MB together). FFmpeg's source code is inside
+  too (11 MB), so the APK can be shared on its own. The app itself is 26 MB.
 - **Phones:** arm64-v8a, armeabi-v7a, x86_64 and x86, Android 8.0 (API 26) or later.
 - **Free space:** installing needs well over 1 GB free, because Android keeps a reserve; an
   emulator here refused it at 1.3 GB free. Once installed the models take no second copy,
@@ -73,7 +74,8 @@ are ready. There is nothing to download or set up first.
   Settings, else the first track it can decode. Tracks the phone cannot decode are marked.
 - **AC-3, E-AC-3, DTS, TrueHD**: many phones have no decoder for these. The app then uses
   its own FFmpeg decoders, both for playback and for recognition. The phone's own decoders
-  are always tried first. About & licences shows the FFmpeg version and licence.
+  are always tried first. About & licences shows the FFmpeg version and licence, and
+  **Save FFmpeg source code** there saves FFmpeg's source (built into the app) to the phone.
 - **Use only the fast CPU cores** (Settings, on by default): keeps recognition and
   translation off the slow power-saving cores of big.LITTLE phones; one thread on a slow
   core holds all the others back. The fast cores come from the kernel's `cpu_capacity`
@@ -147,6 +149,11 @@ bash scripts/build_ffmpeg.sh "$ANDROID_SDK/ndk/27.1.12297006" C:/ffbuild
   `make.exe`.
 - Output goes to `app/src/main/ffmpeg/`. `jniLibs/` and `include/` are git-ignored; the
   configure line per ABI (`configuration-<abi>.txt`) is versioned.
+- It also copies `ffmpeg-7.1.5.tar.xz` to the project root (git-ignored). The release build
+  packs it, the build script and the configure lines into
+  `assets/source/ffmpeg-7.1.5-source.zip`, so the LGPL source travels inside the APK. The
+  build stops if the FFmpeg libraries are present but the tarball is missing or its SHA-256
+  differs.
 - Without this step the app still builds and runs. It then has no FFmpeg fallback, and
   About says so.
 
@@ -456,8 +463,8 @@ decides.
   app.
 - Every dependency is MIT, Apache-2.0, BSD-2-Clause or zlib, except FFmpeg's decoders, which
   are LGPL 2.1 or later. They are kept as separate shared libraries that can be replaced,
-  and their source (`ffmpeg-7.1.5.tar.xz`, kept next to the APK) must be shared along with
-  the APK. There is **no GPL or non-free code**. See
+  and their source is built into the APK (About & licences → **Save FFmpeg source code**),
+  so the APK can be shared on its own. There is **no GPL or non-free code**. See
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
   [docs/dependencies-release.txt](docs/dependencies-release.txt). The licence texts are
   also shown in the app.
