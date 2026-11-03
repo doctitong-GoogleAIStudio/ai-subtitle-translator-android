@@ -47,5 +47,7 @@ object WhisperNative {
         fallback: Boolean,
         vadModel: String?,
         initialPrompt: String?,
+        /** Encoder frames (50 per second of audio); 0 = whisper.cpp's full 30 s window. */
+        audioCtx: Int,
     ): NativeResult?
 }

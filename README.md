@@ -5,17 +5,18 @@ own video files and shows English subtitles generated **on the phone**: Whisper 
 recognition, translation to English (M2M100 418M or Whisper's own translate task, whichever
 measured better for the chosen speech model), a look-ahead buffer that stays ahead of the
 playhead, a cache so a movie is never processed twice, SRT export, an audio track picker
-and optional LGPL FFmpeg decoders for AC-3, E-AC-3 and DTS soundtracks. No movie audio,
-subtitles or keys leave the device. Every model is built into the app, so nothing is
+optional LGPL FFmpeg decoders for AC-3, E-AC-3 and DTS soundtracks, and **Live Floating
+Subtitles**: English subtitles over YouTube and other apps, from the sound they play. No
+movie audio, subtitles or keys leave the device. Every model is built into the app, so nothing is
 downloaded, and the app has no internet permission at all.
 
-Status: **version 1.0.0**, release build (see [Phases](#phases)). Package
+Status: **version 1.1.0**, release build (see [Phases](#phases)). Package
 `com.aivicventures.subtitletranslator`.
 
 ## The APK
 
 `AI-Subtitle-Translator-universal.apk` in this folder is the universal release build,
-version 1.0.0:
+version 1.1.0 ([release notes](docs/release-notes-1.1.0.md)):
 - **Size:** about 816 MB, because every model is inside: Whisper tiny, base and small,
   Silero VAD, and the M2M100 translator (778 MB together). FFmpeg's source code is inside
   too (11 MB), so the APK can be shared on its own. The app itself is 26 MB.
@@ -25,6 +26,7 @@ version 1.0.0:
   because they are read straight from the APK.
 - **Signing:** signed with this project's own release key (see
   [Release signing](#release-signing)), not the debug key.
+- **Upgrading from 1.0:** install over it (same key); recent movies and saved subtitles are kept.
 - **Upgrading from 0.1:** earlier builds were signed with the debug key, so Android will not
   install 1.0 over them. Uninstall the old app first. This also clears its recent list and
   saved subtitles, and the models it had downloaded.
@@ -100,6 +102,48 @@ are ready. There is nothing to download or set up first.
   - On a 32-bit phone, Whisper translates (M2M100 needs a 64-bit phone).
   - Each choice has its own cache, so lines from the two translators are never mixed.
 
+## Live Floating Subtitles
+
+**Live subtitles** on the main screen opens the dashboard. Pick the audio source and tap
+**Start Live Subtitles**; then open YouTube or any video app. English subtitles float over
+it, with a small **CC** button for the controls.
+
+- **Audio sources:**
+  - **Internal audio** (Android 10+, default): the sound of the playing app, through
+    Android's playback capture. Android asks for "record audio" and a screen-sharing
+    confirmation every time; only sound is used, never the picture. Apps can refuse
+    capture (DRM films, some apps). The app then says so and offers the microphone; it
+    never switches by itself.
+  - **Microphone**: for a video on a TV, laptop or another phone. Noise suppression and
+    gain in Live settings.
+  - **External device (TV, laptop)**: microphone, with big subtitles in the app instead of
+    an overlay (for a phone on a stand next to the TV).
+- **Quality:** **Fast** (default) shows a provisional line in italics while it is spoken and
+  ends lines on 0.5 s pauses (at most 6 s). **High Accuracy** waits for 0.9 s pauses (at
+  most 12 s), decodes with fallback and uses more context.
+- **Pipeline:** energy-based speech detection with an adaptive noise floor, then Whisper
+  (with Silero VAD, language detection and the player's hallucination filters), then
+  M2M100, then a timeline that holds lines for reading time (15 characters per second,
+  1.5–6 s), merges repeats, drops lines more than 10 s late and applies the delay setting
+  (−3 to +10 s). The last lines are given to Whisper as context, and names seen twice are
+  kept spelled the same way.
+- **Floating button:** Pause/Resume, Move (drag the subtitles), Smaller/Larger, Open app,
+  Stop. It snaps to the screen edge and fades when idle. The subtitles let touches through
+  to the video app. The ongoing notification also has Pause and Stop.
+- **Live settings:** text size, colour, bold, outline, background, position, 1–2 lines,
+  speech model and translator, context memory, delay, noise suppression, microphone gain,
+  auto-stop (after 10/30/60 minutes without speech), and Developer: latency readout and
+  **Short audio window**.
+- **Status and usage:** the dashboard shows what is running (capture, language with
+  confidence, recognition, translation, overlay, latency per stage) and the session's
+  usage. Everything runs on the phone, so the estimated cost is always 0.
+- **Privacy:** audio is handled in memory, in pieces of at most 12 s, and dropped after
+  recognition; nothing is saved or sent. See
+  [docs/live-permissions-disclosure.md](docs/live-permissions-disclosure.md).
+
+Plan and design: [docs/live-subtitles-plan.md](docs/live-subtitles-plan.md). Emulator
+results: [docs/live-compatibility-report.md](docs/live-compatibility-report.md).
+
 ## Building
 
 You need Android Studio's bundled JBR (Java 21), Android SDK 37, NDK 27.1.12297006 and
@@ -111,6 +155,13 @@ export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
 ```
 
 The output is `app/build/outputs/apk/release/app-release.apk`.
+
+`./gradlew :app:bundleRelease` also builds an Android App Bundle
+(`app/build/outputs/bundle/release/app-release.aab`, 791 MB, same release key; a copy is
+`AI-Subtitle-Translator.aab` here, git-ignored). It is not ready for Google Play as it is:
+Play limits how large the base module may be, far below the 778 MB of models inside it.
+A Play upload would need the models moved to Play Asset Delivery packs, which has not been
+done. The universal APK is the release file.
 
 The first build downloads the models (778 MB) into `bundled-models/` (git-ignored, kept
 across clean builds):
@@ -184,6 +235,7 @@ it and is force-included.
 | Cache | `cache/CacheDb.kt` | Tables: movies, profiles, segments, coverage. |
 | Subtitles | `subtitles/Layout.kt`, `Subtitles.kt` | Port of the Windows layout rules: 2 × 42 characters, ≤ 20 characters per second, ≤ 7 s per cue. SRT writer. |
 | Models | `models/ModelManager.kt`, `assets/model_catalog.json` | All bundled in the APK (fetched and SHA-256 checked at build time). Weights read in place from the APK; default speech model chosen by device RAM. |
+| Live subtitles | `live/` | `LiveSubtitleService` (foreground service, MediaProjection), `AudioSources` (playback capture, microphone, test file), `UtteranceSegmenter`, `LiveEngine`, `SubtitleTimeline`, `ContextMemory`, `LiveStats`, `SubtitleOverlay` (two `TYPE_APPLICATION_OVERLAY` windows). whisper.cpp's `audio_ctx` limits the encoder to the piece's length |
 | UI | `ui/` | Material 3 (Material Components 1.14), light and dark, brand colours. Main (recent movies with remove/delete), Player (Media3 ExoPlayer + subtitle overlay, landscape full screen, fit/fill), Built-in models, Settings, About & licences. |
 
 Native ASR details:
@@ -379,6 +431,20 @@ The emulator can show that these switches take effect. It cannot show whether th
 - Whether pinning and fewer threads save time or battery on a real big.LITTLE phone is
   **unmeasured**.
 
+### Version 1.1.0: Live Floating Subtitles (emulator)
+
+Full details: [docs/live-compatibility-report.md](docs/live-compatibility-report.md).
+Emulator: Android 16, x86_64, 6 vCPU, 4 GB; base + M2M100, Fast.
+
+| Test | Result |
+|---|---|
+| JVM unit tests (segmenter, timeline, context memory, stats) | 15 new; 37/37 pass in total |
+| FLEURS test movie through the live pipeline in real time | chrF **35.1** (Full Movie, same models: 42.3), 15/16 utterances; final lines a median 4.6 s after the speech, provisional lines 1.5 s |
+| Google Photos, Internal audio | Captured; subtitles over the player |
+| YouTube 20.10.41, Internal audio | **Captured on this emulator** (Spanish live news); final lines a median 6 s after the speech, as the emulator also decodes the video in software. Not checked on a real phone |
+| Overlay | Touch-through, rotation, move, pause/resume, stop (panel and notification), Android's screen-sharing indicator |
+| Refusals | Screen sharing, overlay permission: error card and a way forward; no silent switch to the microphone |
+
 ### Not tested yet
 
 - A real ARM phone: speed, battery, heat, and memory with small on a 4 GB phone. M2M100
@@ -420,6 +486,17 @@ decides.
   build without the FFmpeg step has no such decoders.
 - **DTS:X, TrueHD Atmos and E-AC-3 JOC**: only their core or bed channels are decoded.
   That is enough for dialogue.
+- **Live subtitles:**
+  - Measured on the emulator only. YouTube capture worked there; apps and phones that
+    refuse capture (DRM films, some apps, some phone makers) cannot be subtitled from
+    internal audio, and the app does not get around that. The microphone is the fallback.
+  - Live translation is weaker than the player's (chrF 35 vs 42 on FLEURS): it sees a few
+    seconds of audio at a time, and short pieces are sometimes detected as the wrong
+    language. Setting the source language helps.
+  - Subtitles come 1.5–6 s after the speech on the emulator. A negative delay cannot make
+    them earlier than that.
+  - Android asks for the screen-sharing confirmation at every start; apps cannot skip it.
+  - Notches and phone makers' skins are untested.
 - When a saved track is not the first, the player starts the first track's decoder for a
   moment before switching. Nothing is heard, because playback starts paused.
 
@@ -444,19 +521,26 @@ decides.
      saver that also follows Power Saver, low battery and heat.
    - No real phone was available, so the tuning is implemented and shown to take effect,
      but not measured.
-4. **Version 1.0.0 (this build)**:
+4. **Version 1.0.0**:
    - Every model built into the APK, no downloads and no internet permission.
    - Landscape full screen with fit/fill, remove and delete in Recent movies, and a
      Material 3 look with a new launcher icon (themed icon on Android 13+).
    - Release key instead of the debug key.
-5. **Next: real-phone measurements**:
+5. **Version 1.1.0 (this build)**:
+   - Live Floating Subtitles: internal audio, microphone and external-device modes, a
+     floating overlay with controls, Fast and High Accuracy, context memory, delay, a
+     latency readout, a dashboard and Live settings. On-device only; no cloud provider.
+6. **Next: real-phone measurements**:
    - Follow [docs/real-device-test-plan.md](docs/real-device-test-plan.md) on one or more
      phones, then adjust the defaults from the results.
 
 ## Privacy and licences
 
-- No analytics, no accounts, no backups (`allowBackup=false`) and **no permissions**: not
-  even INTERNET (the network permissions Media3 declares are removed from the manifest).
+- No analytics, no accounts, no backups (`allowBackup=false`) and **no INTERNET
+  permission** (the network permissions Media3 declares are removed from the manifest).
+  The movie player needs no permissions at all. Live subtitles add display over other
+  apps, record audio, foreground service and notifications, each asked for only when a
+  live session starts ([disclosure](docs/live-permissions-disclosure.md)).
 - If a cloud feature is ever added, it will be off by default, and its key will be stored
   with Android Keystore.
 - The models are redistributed in the APK under their MIT licences, which are shown in the

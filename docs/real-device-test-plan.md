@@ -186,3 +186,52 @@ Wireless debugging → Pair device with pairing code). Steps:
 4. Run the `saver` suite with `ANDROID_SERIAL=<ip>:<port>`.
 5. Compare the battery `level` in `device.txt` before and after. Run `info` again to
    record the "after" level.
+
+## Live Floating Subtitles
+
+Version 1.1.0 was tested on the emulator only
+([live-compatibility-report.md](live-compatibility-report.md)). These checks need a real
+phone. They are done by hand; the automated parts run from the PC.
+
+**Automated (test file, no app needed):**
+
+1. Copy the test movie to the app's folder and start a session that reads it in real time:
+
+   ```bash
+   adb push test-media/fleurs_e2e.mkv /sdcard/Android/data/com.aivicventures.subtitletranslator/files/live-test/
+   adb shell setprop log.tag.LiveEngine DEBUG
+   adb logcat -c
+   adb shell am start -n com.aivicventures.subtitletranslator/.ui.LiveActivity --es test_audio fleurs_e2e.mkv --es test_mode MICROPHONE
+   ```
+
+2. After about 5 minutes ("The audio source ended" in the log), save the log and score it:
+
+   ```bash
+   adb logcat -d -s LiveEngine:* > live.log
+   python scripts/score_e2e.py test-media/fleurs_e2e_truth.json live.log
+   adb shell setprop log.tag.LiveEngine INFO
+   ```
+
+   Each `line N` row in the log gives the recognition and translation time and the lag
+   (end of speech → on screen). The emulator gave chrF 35.1, final lines 4.6 s after the
+   speech (median), provisional lines 1.5 s.
+
+**By hand (the person holds the phone):**
+
+| # | Check | Pass when |
+|---|---|---|
+| 1 | Internal audio with Google Photos or the phone's gallery playing a video with speech | Subtitles over the player within a few seconds |
+| 2 | Internal audio with YouTube | Either subtitles appear, or within ~5 s the panel says capture is blocked and offers the microphone (it must never switch by itself) |
+| 3 | Internal audio with Netflix or another DRM app | Blocked message, nothing captured |
+| 4 | Microphone, video on a TV or laptop 1–2 m away | Subtitles follow the speech; note how much worse it is from the phone's own speaker |
+| 5 | External device mode | Big subtitles in the app, screen stays on |
+| 6 | Touch-through: tap the video under the subtitles | The video app reacts (pause/controls) |
+| 7 | Rotate during playback; a phone with a notch or punch hole | Subtitles stay on screen, not under the cutout |
+| 8 | Floating button: Pause, Resume, Move, Smaller, Larger, Stop; notification Stop | Each does what it says; Stop removes the overlay and the screen-sharing indicator |
+| 9 | Refuse each permission once (overlay, microphone, screen sharing) | A clear message and a way forward, no crash |
+| 10 | 30 minutes of a film in Internal audio | Auto-stop after 30 min of no speech only; note battery % used and whether the phone gets hot |
+| 11 | Phone maker skins (Samsung, Xiaomi, Oppo/Realme, …) | The session survives switching apps and turning the screen off and on |
+
+Record for each phone: model, Android version, app versions (YouTube!), the pass/fail of
+each row, and the delay shown in the panel. Add the results to the compatibility report;
+do not claim an app works on phones that were not tested.

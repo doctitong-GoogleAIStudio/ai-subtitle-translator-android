@@ -204,7 +204,7 @@ Java_com_aivicventures_subtitletranslator_asr_WhisperNative_detectSpeech(
 JNIEXPORT jobject JNICALL
 Java_com_aivicventures_subtitletranslator_asr_WhisperNative_transcribe(
         JNIEnv *env, jobject, jlong ptr, jfloatArray samples, jstring language, jboolean translate,
-        jint threads, jboolean fallback, jstring vad_model, jstring initial_prompt) {
+        jint threads, jboolean fallback, jstring vad_model, jstring initial_prompt, jint audio_ctx) {
     auto *h = reinterpret_cast<Handle *>(ptr);
     if (h == nullptr || h->abort.load()) return nullptr;
 
@@ -227,6 +227,9 @@ Java_com_aivicventures_subtitletranslator_asr_WhisperNative_transcribe(
     p.greedy.best_of = fallback ? 3 : 1;
     p.temperature_inc = fallback ? 0.2f : 0.0f;
     p.initial_prompt = prompt.empty() ? nullptr : prompt.c_str();
+    // Encoder frames to use (50 per second of audio); 0 = the full 30 s window. Short live
+    // utterances need only a fraction of it, and the encoder cost shrinks with it.
+    p.audio_ctx = audio_ctx > 0 ? audio_ctx : 0;
     p.abort_callback = abort_callback;
     p.abort_callback_user_data = h;
     if (!vad_path.empty()) {
