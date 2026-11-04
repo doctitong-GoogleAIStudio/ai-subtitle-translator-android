@@ -4,8 +4,7 @@ Same rule as the Windows app's scripts/e2e_quality.py: the English subtitles tha
 inside each utterance (start - 1.0 s .. end + 0.5 s) are joined and scored with chrF
 (character 6-grams, beta 2, whitespace ignored; corpus level, like sacrebleu's default).
 
-Input: an exported SRT file, or a logcat dump with the engine's "  0:00:04.6 → ..." lines
-(the player's SubEngine, or LiveEngine after `adb shell setprop log.tag.LiveEngine DEBUG`).
+Input: an exported SRT file, or a logcat dump with the engine's "  0:00:04.6 → ..." lines.
 Several truth/subtitle pairs (one per test movie) are pooled into one score and one
 per-language table.
 
@@ -36,8 +35,7 @@ def parse_srt(text: str) -> list[tuple[float, str]]:
 def parse_logcat(text: str) -> list[tuple[float, str]]:
     out = []
     for line in text.splitlines():
-        # The player's engine, or a finished line of the live engine (provisional ones are "text~").
-        m = re.search(r"(?:SubEngine:|LiveEngine: text \d+)\s+(\d+):(\d+):(\d+)\.(\d) → \S+\s+(.*)$", line)
+        m = re.search(r"SubEngine:\s+(\d+):(\d+):(\d+)\.(\d) → \S+\s+(.*)$", line)
         if m:
             h, mi, s, d = map(int, m.groups()[:4])
             out.append((h * 3600 + mi * 60 + s + d / 10, m.group(5).strip()))

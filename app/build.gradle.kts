@@ -19,8 +19,8 @@ android {
         applicationId = "com.aivicventures.subtitletranslator"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.1.1"
 
         // One universal APK with every ABI.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86") }

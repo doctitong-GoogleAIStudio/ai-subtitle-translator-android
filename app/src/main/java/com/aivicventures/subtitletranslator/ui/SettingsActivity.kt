@@ -1,6 +1,8 @@
 package com.aivicventures.subtitletranslator.ui
 
 import android.os.Bundle
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
@@ -8,6 +10,9 @@ import com.aivicventures.subtitletranslator.device.CpuTopology
 import com.aivicventures.subtitletranslator.settings.Languages
 import com.aivicventures.subtitletranslator.settings.Mode
 import com.aivicventures.subtitletranslator.translate.TranslatorNative
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.slider.Slider
+import com.google.android.material.slider.TickVisibilityMode
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,12 +62,43 @@ class SettingsActivity : ComponentActivity() {
         col.addFull(card(16) {
             addFull(switchRow(getString(R.string.setting_landscape), getString(R.string.setting_landscape_help), s.landscapeFullScreen) { s.landscapeFullScreen = it })
         })
+    }
 
-        col.addFull(sectionTitle(getString(R.string.live_title)))
-        col.addFull(card(16) {
-            addFull(choiceRow(getString(R.string.live_settings_title), getString(R.string.live_settings_link)) {
-                startActivity(android.content.Intent(this@SettingsActivity, LiveSettingsActivity::class.java))
-            })
-        })
+    /** A row showing the current choice; tapping opens a single-choice dialog. */
+    private fun choice(title: String, items: List<String>, selected: Int, help: String?, onSelect: (Int) -> Unit): LinearLayout {
+        var current = selected.coerceIn(0, items.size - 1)
+        return choiceRow(title, items[current], help) { valueView: TextView ->
+            MaterialAlertDialogBuilder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(items.toTypedArray(), current) { dialog, which ->
+                    current = which
+                    valueView.text = items[which]
+                    onSelect(which)
+                    dialog.dismiss()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+    }
+
+    private fun slider(title: String, from: Int, to: Int, value: Int, label: (Int) -> String, onChange: (Int) -> Unit): LinearLayout {
+        val valueView = body(label(value))
+        return stack(
+            row(null, stack(rowTitle(title)), valueView),
+            Slider(this).apply {
+                valueFrom = from.toFloat()
+                valueTo = to.toFloat()
+                stepSize = 1f
+                tickVisibilityMode = TickVisibilityMode.TICK_VISIBILITY_HIDDEN
+                this.value = value.coerceIn(from, to).toFloat()
+                setLabelFormatter { label(it.toInt()) }
+                addOnChangeListener { _, v, fromUser ->
+                    if (fromUser) {
+                        onChange(v.toInt())
+                        valueView.text = label(v.toInt())
+                    }
+                }
+            },
+        ).apply { setPadding(0, dp(10), 0, 0) }
     }
 }

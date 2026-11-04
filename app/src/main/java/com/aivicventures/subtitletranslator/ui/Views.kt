@@ -22,10 +22,7 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
-import com.google.android.material.slider.Slider
-import com.google.android.material.slider.TickVisibilityMode
 import com.google.android.material.R as M
 
 /** Helpers for the code-built screens: Material 3 components, brand colours from the theme. */
@@ -225,47 +222,4 @@ fun formatSize(bytes: Long): String = when {
 fun formatTime(sec: Double): String {
     val s = sec.toInt().coerceAtLeast(0)
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
-}
-
-/** A row showing the current choice; tapping opens a single-choice dialog. */
-fun Context.choice(title: String, items: List<String>, selected: Int, help: String?, onSelect: (Int) -> Unit): LinearLayout {
-    var current = selected.coerceIn(0, items.size - 1)
-    return choiceRow(title, items[current], help) { valueView: TextView ->
-        MaterialAlertDialogBuilder(this)
-            .setTitle(title)
-            .setSingleChoiceItems(items.toTypedArray(), current) { dialog, which ->
-                current = which
-                valueView.text = items[which]
-                onSelect(which)
-                dialog.dismiss()
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-}
-
-fun Context.slider(title: String, from: Int, to: Int, value: Int, label: (Int) -> String, onChange: (Int) -> Unit): LinearLayout =
-    slider(title, from.toFloat(), to.toFloat(), 1f, value.toFloat(), { label(it.toInt()) }) { onChange(it.toInt()) }
-
-/** A titled slider whose current value is shown at the end of the title row. */
-fun Context.slider(title: String, from: Float, to: Float, step: Float, value: Float, label: (Float) -> String, onChange: (Float) -> Unit): LinearLayout {
-    val valueView = body(label(value))
-    return stack(
-        row(null, stack(rowTitle(title)), valueView),
-        Slider(this).apply {
-            valueFrom = from
-            valueTo = to
-            stepSize = step
-            tickVisibilityMode = TickVisibilityMode.TICK_VISIBILITY_HIDDEN
-            // The slider rejects values off its step grid.
-            this.value = (from + Math.round((value.coerceIn(from, to) - from) / step) * step).coerceIn(from, to)
-            setLabelFormatter { label(it) }
-            addOnChangeListener { _, v, fromUser ->
-                if (fromUser) {
-                    onChange(v)
-                    valueView.text = label(v)
-                }
-            }
-        },
-    ).apply { setPadding(0, dp(10), 0, 0) }
 }

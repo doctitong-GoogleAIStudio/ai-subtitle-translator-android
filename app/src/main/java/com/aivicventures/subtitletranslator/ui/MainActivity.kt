@@ -15,9 +15,7 @@ import androidx.appcompat.widget.PopupMenu
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.cache.MovieRecord
-import com.aivicventures.subtitletranslator.live.LiveSession
 import com.google.android.material.R as M
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -26,7 +24,6 @@ import com.google.android.material.progressindicator.LinearProgressIndicator
 class MainActivity : ComponentActivity() {
     private lateinit var chips: ChipGroup
     private lateinit var recent: LinearLayout
-    private lateinit var liveButton: MaterialButton
 
     private val openVideo = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -67,18 +64,6 @@ class MainActivity : ComponentActivity() {
             addFull(chips, 10)
         }, 8)
 
-        // Live Floating Subtitles: English subtitles over videos playing in other apps.
-        liveButton = tonalButton(getString(R.string.live_open), R.drawable.ic_closed_caption) {
-            startActivity(Intent(this, LiveActivity::class.java))
-        }
-        col.addFull(card(16) {
-            addView(row(
-                iconBadge(R.drawable.ic_closed_caption, M.attr.colorTertiaryContainer, M.attr.colorOnTertiaryContainer),
-                stack(heading(getString(R.string.live_title)), caption(getString(R.string.live_description))),
-            ))
-            addFull(liveButton, 12)
-        }, 12)
-
         col.addFull(sectionTitle(getString(R.string.recent)))
         recent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addFull(recent)
@@ -87,7 +72,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         showStatus()
-        liveButton.text = getString(if (LiveSession.state.value.running) R.string.live_open_running else R.string.live_open)
         showRecent()
     }
 
