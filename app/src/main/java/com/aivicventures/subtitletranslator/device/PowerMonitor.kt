@@ -16,9 +16,12 @@ import android.os.PowerManager
  * the app's Battery saver setting, the system Power Saver, battery at or below 15 % while not
  * charging, or the phone reporting itself hot (thermal status SEVERE). At CRITICAL and
  * above, one thread and a pause between jobs.
+ *
+ * Warm (thermal status MODERATE, or any saving): Whisper does less work per chunk, with no
+ * thread limit yet, to put off the point where the phone slows itself down.
  */
 class PowerMonitor(private val context: Context, private val batterySaverSetting: Boolean) {
-    data class State(val saving: Boolean, val critical: Boolean, val reason: String) {
+    data class State(val saving: Boolean, val critical: Boolean, val reason: String, val warm: Boolean = saving) {
         /** Threads for the next job, from the user's setting. */
         fun threads(base: Int): Int = when {
             critical -> 1
@@ -44,6 +47,7 @@ class PowerMonitor(private val context: Context, private val batterySaverSetting
     companion object {
         const val LOW_BATTERY = 15
         // PowerManager.THERMAL_STATUS_SEVERE / _CRITICAL (API 29 constants, inlined for minSdk 26).
+        const val THERMAL_MODERATE = 2
         const val THERMAL_SEVERE = 3
         const val THERMAL_CRITICAL = 4
 
@@ -57,7 +61,8 @@ class PowerMonitor(private val context: Context, private val batterySaverSetting
                 level in 0..LOW_BATTERY && !charging -> "battery $level %"
                 else -> ""
             }
-            return State(saving = reason.isNotEmpty(), critical = critical, reason = reason)
+            val saving = reason.isNotEmpty()
+            return State(saving = saving, critical = critical, reason = reason, warm = saving || thermal >= THERMAL_MODERATE)
         }
     }
 }

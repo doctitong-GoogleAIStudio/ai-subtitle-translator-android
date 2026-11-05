@@ -333,7 +333,8 @@ class PlayerActivity : ComponentActivity() {
                 prefetchReader = pre
                 val power = PowerMonitor(this@PlayerActivity, intent.getBooleanExtra(EXTRA_BATTERY_SAVER, settings.batterySaver))
                 val eng = LookAheadEngine(r, pre, a, mt, app.db, profile, duration, mode, language, threads, settings.continueWholeMovie,
-                    intent.getIntExtra(EXTRA_MT_BEAM, 0), power, pins)
+                    intent.getIntExtra(EXTRA_MT_BEAM, 0), power, pins, intent.getBooleanExtra(EXTRA_SHORT_AUDIO, false),
+                    intent.getFloatExtra(EXTRA_GROUP_GAP, WhisperAsr.GROUP_GAP.toFloat()).toDouble())
                 Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=$threads prefetch=${pre != null} audio=${r.mime} decoder=${r.decoderName} track=${ordinal + 1}/${tracks.size} pin=${pins ?: "-"} cached=${eng.subtitles().size}".format(duration))
                 Triple(eng, r, a)
             }
@@ -548,6 +549,10 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_AUDIO_TRACK = "audio_track"
         const val EXTRA_PIN_CPUS = "pin_cpus"
         const val EXTRA_BATTERY_SAVER = "battery_saver"
+        /** Test hook: always encode only the length of each line (normally only when behind). */
+        const val EXTRA_SHORT_AUDIO = "short_audio"
+        /** Test hook: largest silence in seconds inside one Whisper run. */
+        const val EXTRA_GROUP_GAP = "group_gap"
         /** Test hook: thread count (1-8) instead of the setting, for benchmarks. */
         const val EXTRA_THREADS = "threads"
     }

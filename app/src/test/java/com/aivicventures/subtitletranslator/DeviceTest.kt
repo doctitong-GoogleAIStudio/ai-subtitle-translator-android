@@ -38,6 +38,10 @@ class DeviceTest {
     }
 
     @Test fun powerSavingTriggers() {
+        assertTrue(PowerMonitor.evaluate(false, false, 80, false, 2).warm)  // less work, all threads
+        assertFalse(PowerMonitor.evaluate(false, false, 80, false, 2).saving)
+        assertFalse(PowerMonitor.evaluate(false, false, 80, false, 1).warm)
+        assertTrue(PowerMonitor.evaluate(false, false, 80, false, 3).warm)
         val normal = PowerMonitor.evaluate(false, false, 80, false, 0)
         assertFalse(normal.saving)
         assertEquals(4, normal.threads(4))

@@ -17,7 +17,20 @@ data class AsrSegment(
     val english: Boolean = true,
 )
 
-data class AsrResult(val segments: List<AsrSegment>, val language: String, val dropped: Int, val unsupportedLanguage: String?)
+/** A recognised line that was thrown away; times relative to the audio window start. */
+data class AsrDrop(val start: Double, val end: Double, val reason: String)
+
+data class AsrResult(
+    val segments: List<AsrSegment>,
+    val language: String,
+    val dropped: Int,
+    val unsupportedLanguage: String?,
+    /** What the VAD called speech, relative to the window start: where a viewer expects a subtitle. */
+    val speech: List<Pair<Double, Double>> = emptyList(),
+    val drops: List<AsrDrop> = emptyList(),
+    /** Speech groups decoded, each at least one full encoder pass. */
+    val groups: Int = 0,
+)
 
 /**
  * whisper.cpp speech recognition. Without a text translator Whisper's translate task turns
@@ -40,6 +53,7 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
     private var mainLanguage: String? = null
     @Volatile private var aborted = false
     private val recent = ArrayDeque<AsrSegment>()
+    private var lastSpeech: List<Pair<Double, Double>> = emptyList()
 
     /** Whisper without temperature fallback can loop on one line; keep only the first. */
     private fun isRepeat(text: String, start: Double): Boolean {
@@ -57,6 +71,11 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
      * @param thorough temperature fallback (High Accuracy / Full Movie, never in catch-up)
      * @param textTranslation languages a text translator will handle: those are transcribed
      *   (segments with english = false); null = Whisper translates everything
+     * @param shortContext encode only as much of Whisper's 30 s window as each group needs
+     *   (faster but less accurate, see [audioCtx]; only for when the engine falls behind)
+     * @param groupGap largest silence in seconds kept inside one speech group
+     * @param recheck decode again in auto mode when unsure of a line in the locked language
+     * @param onLines receives the lines of each group as soon as it is decoded
      * @return null when aborted
      */
     fun run(
@@ -65,12 +84,18 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
         threads: Int,
         thorough: Boolean,
         textTranslation: ((String) -> Boolean)? = null,
+        shortContext: Boolean = false,
+        groupGap: Double = GROUP_GAP,
+        recheck: Boolean = true,
+        onLines: ((List<AsrSegment>) -> Unit)? = null,
     ): AsrResult? {
         aborted = false
         WhisperNative.clearAbort(ptr)
-        val groups = speechGroups(samples) ?: return null
+        val groups = speechGroups(samples, groupGap) ?: return null
         val out = mutableListOf<AsrSegment>()
+        val drops = mutableListOf<AsrDrop>()
         var dropped = 0
+        var decoded = 0
         var unsupported: String? = null
         val seen = HashMap<String, Int>()
         for ((g0, g1) in groups) {
@@ -81,10 +106,11 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
             val chunk = samples.copyOfRange(a, b)
             val fixed = language != "auto"
             val locked = if (fixed) language else mainLanguage
-            var (raw, english) = decode(chunk, locked ?: "auto", threads, thorough, textTranslation) ?: return null
+            var (raw, english) = decode(chunk, locked ?: "auto", threads, thorough, textTranslation, shortContext) ?: return null
+            decoded++
             var lang = raw.language.ifEmpty { locked ?: "auto" }
-            if (!fixed && locked != null && meanLogprob(raw) < RECHECK_LP) {
-                val (alt, altEnglish) = decode(chunk, "auto", threads, thorough, textTranslation) ?: return null
+            if (recheck && !fixed && locked != null && meanLogprob(raw) < RECHECK_LP) {
+                val (alt, altEnglish) = decode(chunk, "auto", threads, thorough, textTranslation, shortContext) ?: return null
                 val altLang = alt.language
                 if (altLang.isNotEmpty() && altLang != locked && meanLogprob(alt) >= RECHECK_LP &&
                     meanLogprob(alt) > meanLogprob(raw)
@@ -101,7 +127,7 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
                 dropped += raw.texts.size
                 continue
             }
-            var keptInGroup = 0
+            val groupLines = mutableListOf<AsrSegment>()
             for (i in raw.texts.indices) {
                 val text = clean(String(raw.texts[i], Charsets.UTF_8))
                 val start = g0 + raw.t0[i] / 1000.0
@@ -119,22 +145,24 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
                 val kept = if (reason == null) Hallucination.stripHallucinations(text).trim() else ""
                 if (reason != null || kept.isEmpty()) {
                     dropped++
+                    drops.add(AsrDrop(start, end, reason ?: "credit"))
                     // Dialogue text only with `adb shell setprop log.tag.WhisperAsr DEBUG` (it may be private).
                     if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "drop [$reason] %.2f-%.2f ns=%.2f lp=%.2f: %s".format(start, end, ns, lp, text))
                     continue
                 }
                 val seg = AsrSegment(start, end, kept, lang, lp, ns, english)
                 out.add(seg)
+                groupLines.add(seg)
                 recent.addLast(seg)
                 if (recent.size > 2) recent.removeFirst()
-                keptInGroup++
             }
+            if (groupLines.isNotEmpty()) onLines?.invoke(groupLines)
             // Only confident speech counts towards the movie's main language (music and
             // noise are often "detected" as English).
-            if (!fixed && locked == null && keptInGroup > 0 && meanLogprob(raw) >= RECHECK_LP) noteLanguage(lang)
+            if (!fixed && locked == null && groupLines.isNotEmpty() && meanLogprob(raw) >= RECHECK_LP) noteLanguage(lang)
         }
         val windowLang = seen.maxByOrNull { it.value }?.key ?: mainLanguage ?: language
-        return AsrResult(out, windowLang, dropped, if (out.isEmpty()) unsupported else null)
+        return AsrResult(out, windowLang, dropped, if (out.isEmpty()) unsupported else null, lastSpeech, drops, decoded)
     }
 
     /**
@@ -148,29 +176,36 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
         threads: Int,
         thorough: Boolean,
         textTranslation: ((String) -> Boolean)?,
+        shortContext: Boolean,
     ): Pair<NativeResult, Boolean>? {
+        val ctx = if (shortContext) audioCtx(chunk.size) else 0
         if (textTranslation == null) {
-            return (WhisperNative.transcribe(ptr, chunk, language, true, threads, thorough, null, null) ?: return null) to true
+            return (WhisperNative.transcribe(ptr, chunk, language, true, threads, thorough, null, null, ctx) ?: return null) to true
         }
         val transcribe = language == "auto" || language == "en" || textTranslation(language)
-        val raw = WhisperNative.transcribe(ptr, chunk, language, !transcribe, threads, thorough, null, null) ?: return null
+        val raw = WhisperNative.transcribe(ptr, chunk, language, !transcribe, threads, thorough, null, null, ctx) ?: return null
         if (!transcribe) return raw to true
         val detected = raw.language.ifEmpty { language }
         if (detected == "en") return raw to true
         if (detected != "auto" && textTranslation(detected)) return raw to false
         if (detected in Languages.unsupported) return raw to true // dropped by the caller
         // The text translator does not know this language: let Whisper translate it.
-        val translated = WhisperNative.transcribe(ptr, chunk, detected, true, threads, thorough, null, null) ?: return null
+        val translated = WhisperNative.transcribe(ptr, chunk, detected, true, threads, thorough, null, null, ctx) ?: return null
         return translated to true
     }
 
-    /** Speech regions merged into groups (gap <= 1 s, <= 25 s each), padded; whole window if no VAD. */
-    private fun speechGroups(samples: FloatArray): List<Pair<Double, Double>>? {
+    /**
+     * Speech regions merged into groups (gap <= [gap], <= 25 s each), padded; whole window if
+     * no VAD. Every group costs a full encoder pass, so fewer groups means much less work.
+     */
+    private fun speechGroups(samples: FloatArray, gap: Double): List<Pair<Double, Double>>? {
         val len = samples.size.toDouble() / RATE
+        lastSpeech = listOf(0.0 to len)
         val vad = vadPath ?: return listOf(0.0 to len)
         val r = WhisperNative.detectSpeech(ptr, vad, samples) ?: return listOf(0.0 to len)
         if (aborted) return null
-        return groupRegions((0 until r.size / 2).map { r[2 * it].toDouble() to r[2 * it + 1].toDouble() }, len)
+        lastSpeech = (0 until r.size / 2).map { r[2 * it].toDouble() to r[2 * it + 1].toDouble() }
+        return groupRegions(lastSpeech, len, gap)
     }
 
     private fun noteLanguage(lang: String) {
@@ -197,7 +232,7 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
     companion object {
         private const val TAG = "WhisperAsr"
         private const val RATE = 16_000
-        private const val GROUP_GAP = 1.0
+        const val GROUP_GAP = 3.0
         private const val GROUP_MAX = 25.0
         private const val GROUP_PAD = 0.2
         private const val RECHECK_LP = -0.8f
@@ -215,13 +250,23 @@ class WhisperAsr(context: Context, weights: AssetFileDescriptor, private val vad
             return if (n == 0) -10f else (sum / n).toFloat()
         }
 
+        /**
+         * Encoder frames for [samples] of audio: 50 per second plus 1 s of margin, in steps
+         * of 64, at least 256 (Whisper becomes unreliable on much less) and at most the full
+         * window (1500 = 30 s).
+         */
+        fun audioCtx(samples: Int): Int {
+            val frames = (samples.toDouble() / RATE + 1.0) * 50
+            return ((Math.ceil(frames / 64) * 64).toInt()).coerceIn(256, 1500)
+        }
+
         /** Merges sorted speech regions (seconds) into decode groups within [0, len]. */
-        fun groupRegions(regions: List<Pair<Double, Double>>, len: Double): List<Pair<Double, Double>> {
+        fun groupRegions(regions: List<Pair<Double, Double>>, len: Double, gap: Double = GROUP_GAP): List<Pair<Double, Double>> {
             val out = mutableListOf<Pair<Double, Double>>()
             var cur: Pair<Double, Double>? = null
             for ((t0, t1) in regions.sortedBy { it.first }) {
                 val c = cur
-                cur = if (c != null && t0 - c.second <= GROUP_GAP && t1 - c.first <= GROUP_MAX) {
+                cur = if (c != null && t0 - c.second <= gap && t1 - c.first <= GROUP_MAX) {
                     c.first to maxOf(c.second, t1)
                 } else {
                     if (c != null) out.add(c)

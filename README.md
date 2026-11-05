@@ -9,13 +9,13 @@ and optional LGPL FFmpeg decoders for AC-3, E-AC-3 and DTS soundtracks. No movie
 subtitles or keys leave the device. Every model is built into the app, so nothing is
 downloaded, and the app has no internet permission at all.
 
-Status: **version 1.1.1**, release build (see [Phases](#phases)). Package
+Status: **version 1.1.4**, release build (see [Phases](#phases)). Package
 `com.aivicventures.subtitletranslator`.
 
 ## The APK
 
-`AI-Subtitle-Translator-universal.apk` in this folder is the universal release build,
-version 1.1.1 ([release notes](docs/release-notes-1.1.1.md)):
+`AI-Subtitle-Translator-universal v1.1.4.apk` in this folder is the universal release build,
+version 1.1.4 ([release notes](docs/release-notes-1.1.4.md)):
 - **Size:** about 816 MB, because every model is inside: Whisper tiny, base and small,
   Silero VAD, and the M2M100 translator (778 MB together). FFmpeg's source code is inside
   too (11 MB), so the APK can be shared on its own. The app itself is 26 MB.
@@ -25,12 +25,12 @@ version 1.1.1 ([release notes](docs/release-notes-1.1.1.md)):
   because they are read straight from the APK.
 - **Signing:** signed with this project's own release key (see
   [Release signing](#release-signing)), not the debug key.
-- **Upgrading from 1.0 or 1.1.0:** install over it (same key); recent movies and saved subtitles are kept.
+- **Upgrading from 1.0 or 1.1:** install over it (same key); recent movies and saved subtitles are kept.
 - **Upgrading from 0.1:** earlier builds were signed with the debug key, so Android will not
   install 1.0 over them. Uninstall the old app first. This also clears its recent list and
   saved subtitles, and the models it had downloaded.
 
-Install it with `adb install -r AI-Subtitle-Translator-universal.apk`, or by copying the
+Install it with `adb install -r "AI-Subtitle-Translator-universal v1.1.4.apk"`, or by copying the
 file to the phone and opening it.
 
 Use: tap **Open a video**, pick a file, and playback starts by itself once enough subtitles
@@ -445,7 +445,7 @@ decides.
      saver that also follows Power Saver, low battery and heat.
    - No real phone was available, so the tuning is implemented and shown to take effect,
      but not measured.
-4. **Version 1.0.0, and 1.1.1 (this build, the same features)**:
+4. **Version 1.0.0, and 1.1.x (this build, the same features)**:
    - Every model built into the APK, no downloads and no internet permission.
    - Landscape full screen with fit/fill, remove and delete in Recent movies, and a
      Material 3 look with a new launcher icon (themed icon on Android 13+).

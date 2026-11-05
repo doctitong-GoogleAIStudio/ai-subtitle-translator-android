@@ -34,7 +34,7 @@ One phone is enough to start. Each extra phone class makes the defaults safer.
 - **Install the APK:**
 
   ```bash
-  adb install -r AI-Subtitle-Translator-universal.apk
+  adb install -r "AI-Subtitle-Translator-universal v1.1.4.apk"
   ```
 
 - **In the app:**

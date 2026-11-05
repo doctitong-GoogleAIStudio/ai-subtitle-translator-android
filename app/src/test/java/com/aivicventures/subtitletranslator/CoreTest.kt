@@ -4,6 +4,7 @@ import com.aivicventures.subtitletranslator.asr.Hallucination
 import com.aivicventures.subtitletranslator.asr.WhisperAsr
 import com.aivicventures.subtitletranslator.audio.Resampler
 import com.aivicventures.subtitletranslator.buffering.Coverage
+import com.aivicventures.subtitletranslator.buffering.LookAheadEngine
 import com.aivicventures.subtitletranslator.subtitles.Layout
 import com.aivicventures.subtitletranslator.subtitles.Srt
 import com.aivicventures.subtitletranslator.subtitles.Subtitle
@@ -78,13 +79,16 @@ class CoreTest {
     }
 
     @Test fun speechRegionsGrouped() {
-        val g = WhisperAsr.groupRegions(listOf(0.5 to 2.0, 2.5 to 4.0, 6.0 to 8.0, 8.5 to 31.9), 32.0)
+        val g = WhisperAsr.groupRegions(listOf(0.5 to 2.0, 2.5 to 4.0, 6.0 to 8.0, 8.5 to 31.9), 32.0, 1.0)
         assertEquals(3, g.size)
         assertEquals(0.3, g[0].first, 1e-9)
         assertEquals(4.2, g[0].second, 1e-9)
         assertEquals(5.8, g[1].first, 1e-9)
         assertEquals(8.3, g[2].first, 1e-9)
         assertEquals(32.0, g[2].second, 1e-9)
+        // The default keeps pauses of up to 3 s inside one Whisper run.
+        assertEquals(1, WhisperAsr.groupRegions(listOf(0.5 to 2.0, 4.5 to 6.0), 10.0).size)
+        assertEquals(2, WhisperAsr.groupRegions(listOf(0.5 to 2.0, 5.5 to 7.0), 10.0).size)
     }
 
     @Test fun coverageMergesAndFindsGaps() {
@@ -159,5 +163,29 @@ class CoreTest {
         val out = Resampler.resample(src, 48_000, 16_000, 16_000)
         val rms = sqrt(out.copyOfRange(1000, 15000).map { it * it }.average())
         assertTrue("alias rms $rms", rms < 0.02)
+    }
+
+    @Test fun chunkClaimsLinesThatRunIntoIt() {
+        assertTrue(LookAheadEngine.claims(20.0, 22.0, 15.0, 30.0)) // inside
+        assertTrue(LookAheadEngine.claims(14.97, 16.0, 15.0, 30.0)) // at the start
+        assertTrue(LookAheadEngine.claims(14.0, 29.5, 15.0, 30.0)) // already under way
+        assertTrue(LookAheadEngine.claims(14.0, 15.3, 15.0, 30.0))
+        assertFalse(LookAheadEngine.claims(14.0, 15.2, 15.0, 30.0)) // only its tail
+        assertFalse(LookAheadEngine.claims(14.0, 14.8, 15.0, 30.0)) // over before the chunk
+        assertFalse(LookAheadEngine.claims(30.0, 31.0, 15.0, 30.0)) // the next chunk's
+    }
+
+    @Test fun shortAudioWhenTooSlowUntilClearlyRecovered() {
+        assertFalse(LookAheadEngine.shortAudioNext(false, 3.5))
+        assertFalse(LookAheadEngine.shortAudioNext(false, 1.5))
+        assertTrue(LookAheadEngine.shortAudioNext(false, 0.9))
+        assertTrue(LookAheadEngine.shortAudioNext(true, 1.5))
+        assertFalse(LookAheadEngine.shortAudioNext(true, 2.5))
+    }
+
+    @Test fun audioCtxFollowsTheLengthOfTheSpeech() {
+        assertEquals(256, WhisperAsr.audioCtx(16_000))
+        assertEquals(1024, WhisperAsr.audioCtx(19 * 16_000))
+        assertEquals(1500, WhisperAsr.audioCtx(40 * 16_000))
     }
 }
