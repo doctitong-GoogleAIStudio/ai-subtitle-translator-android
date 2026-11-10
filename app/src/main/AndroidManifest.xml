@@ -2,15 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- No network at all: every model is bundled, and movies and subtitles never leave the
-         device. Media3 declares these two for streaming and wake locks, which the app does not use. -->
+    <!-- The built-in browser loads the websites the user opens. Nothing else uses the network:
+         every model is bundled, and movies, audio and subtitles never leave the device.
+         Media3 declares these two for streaming and wake locks, which the app does not use. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- usesCleartextTraffic below: like any browser it opens http:// sites the user types or
+         follows; the browser is the only part of the app that uses the network. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove" />
 
     <!-- Live Floating Subtitles only, each asked for when the user starts a session:
          subtitles over other apps, the sound to recognise (Android requires RECORD_AUDIO for
          playback capture too) and the foreground service with its ongoing notification.
-         Still no INTERNET: the audio never leaves the phone. -->
+         The audio never leaves the phone. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -22,6 +26,7 @@
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:usesCleartextTraffic="true"
         android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -86,6 +91,17 @@
             android:exported="false"
             android:label="@string/live_title"
             android:theme="@style/AppTheme.Player" />
+
+        <activity
+            android:name=".ui.BrowserActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="false"
+            android:launchMode="singleTask" />
+
+        <!-- No usage metrics from the browser's WebView to Google. -->
+        <meta-data
+            android:name="android.webkit.WebView.MetricsOptOut"
+            android:value="true" />
 
         <service
             android:name=".live.LiveSubtitleService"

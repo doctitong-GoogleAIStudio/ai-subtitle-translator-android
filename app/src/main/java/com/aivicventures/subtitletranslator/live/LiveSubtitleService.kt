@@ -27,6 +27,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
+import com.aivicventures.subtitletranslator.ui.BrowserActivity
 import com.aivicventures.subtitletranslator.ui.LiveActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -49,6 +50,9 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
     private var overlay: SubtitleOverlay? = null
     private var projection: MediaProjection? = null
     private var mode = AudioMode.INTERNAL
+    /** Started by the built-in browser, which shows the subtitles itself. */
+    private var inApp = false
+    private var lastStartId = 0
     private var shownIds = HashSet<Long>()
     private var lastLines: List<LiveSession.Line> = emptyList()
     private var lastStatsAt = 0L
@@ -64,6 +68,7 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_START -> start(intent)
             ACTION_STOP -> stopSession(null)
@@ -71,15 +76,23 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
             ACTION_USE_MIC -> useMicrophone()
         }
         // A command without a session (or a restart by the system) has nothing to run.
-        if (engine == null && intent?.action != ACTION_START) stopSelf()
+        if (engine == null && intent?.action != ACTION_START) stopSelf(startId)
         return START_NOT_STICKY
     }
 
     private fun start(intent: Intent) {
         if (engine != null) return
         mode = runCatching { AudioMode.valueOf(intent.getStringExtra(EXTRA_MODE)!!) }.getOrDefault(AudioMode.MICROPHONE)
+        inApp = intent.getBooleanExtra(EXTRA_IN_APP, false)
         val testFile = intent.getStringExtra(EXTRA_TEST_FILE)
+        active = this
         LiveSession.update { LiveSession.State(phase = LiveSession.Phase.STARTING, mode = mode, quality = app.liveSettings.quality) }
+        if (mode == AudioMode.PAGE) {
+            // The browser's own video sound: nothing outside the app is heard or captured, so
+            // no foreground service, notification or microphone permission is involved, and
+            // the session ends with the browser screen.
+            return run(PageAudioSource())
+        }
         // Android 14+: the service must be in the foreground with the right type before the
         // projection token is used, and the microphone type needs RECORD_AUDIO already granted.
         val type = when {
@@ -118,7 +131,12 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
             Log.e(TAG, "audio source", e)
             return fail(e.message ?: getString(R.string.live_error_generic))
         }
-        if (mode.usesOverlay) {
+        run(source)
+    }
+
+    private fun run(source: LiveAudioSource) {
+        // In the built-in browser the subtitles are drawn over the video there, not floating.
+        if (mode.usesOverlay && !inApp) {
             if (!Settings.canDrawOverlays(this)) return fail(getString(R.string.live_error_overlay_denied))
             overlay = SubtitleOverlay(this, this).also { it.show() }
         }
@@ -171,8 +189,11 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
         e?.stop()
         projection?.stop()
         projection = null
+        if (active === this) active = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // Only if no newer request is queued: Stop followed at once by Start (a source change)
+        // must not end the service before the Start arrives.
+        stopSelf(lastStartId)
     }
 
     private fun onTick() {
@@ -242,8 +263,11 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
     }
 
     override fun openApp() {
-        startActivity(Intent(this, LiveActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        startActivity(Intent(this, screen()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
+
+    /** Where the notification leads: the browser for its own sessions. */
+    private fun screen(): Class<*> = if (inApp) BrowserActivity::class.java else LiveActivity::class.java
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -252,6 +276,7 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
 
     override fun onDestroy() {
         if (engine != null) stopSession(null)
+        if (active === this) active = null
         scope.cancel()
         super.onDestroy()
     }
@@ -270,13 +295,14 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
             })
         }
         val paused = engine?.paused == true
-        val open = PendingIntent.getActivity(this, 0, Intent(this, LiveActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(this, 0, Intent(this, screen()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE)
         fun action(a: String, req: Int) = PendingIntent.getService(this, req, Intent(this, LiveSubtitleService::class.java).setAction(a), PendingIntent.FLAG_IMMUTABLE)
         val source = getString(
             when (m) {
                 AudioMode.INTERNAL -> R.string.live_notif_internal
                 AudioMode.MICROPHONE -> R.string.live_notif_mic
                 AudioMode.SECOND_DEVICE -> R.string.live_notif_second
+                AudioMode.PAGE -> R.string.live_notif_page
             },
         )
         return NotificationCompat.Builder(this, CHANNEL)
@@ -306,15 +332,33 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_TEST_FILE = "test_file"
+        const val EXTRA_IN_APP = "in_app"
 
-        /** Starts a session; for [AudioMode.INTERNAL] pass the screen-capture consent result. */
-        fun start(context: Context, mode: AudioMode, resultCode: Int = 0, resultData: Intent? = null, testFile: String? = null) {
+        /** The running service (main thread only). */
+        private var active: LiveSubtitleService? = null
+
+        /** The browser's video jumped: drop what was heard before the jump. */
+        fun resync() {
+            active?.engine?.resync()
+        }
+
+        /**
+         * Starts a session; for [AudioMode.INTERNAL] pass the screen-capture consent result.
+         * [inApp]: the built-in browser draws the subtitles, so no floating overlay is shown.
+         */
+        fun start(
+            context: Context, mode: AudioMode, resultCode: Int = 0, resultData: Intent? = null,
+            testFile: String? = null, inApp: Boolean = false,
+        ) {
             val i = Intent(context, LiveSubtitleService::class.java).setAction(ACTION_START)
                 .putExtra(EXTRA_MODE, mode.name)
                 .putExtra(EXTRA_RESULT_CODE, resultCode)
+                .putExtra(EXTRA_IN_APP, inApp)
             if (resultData != null) i.putExtra(EXTRA_RESULT_DATA, resultData)
             if (testFile != null) i.putExtra(EXTRA_TEST_FILE, testFile)
-            ContextCompat.startForegroundService(context, i)
+            // The page source runs only while the browser is on screen: a plain service is enough.
+            if (mode == AudioMode.PAGE && testFile == null) context.startService(i)
+            else ContextCompat.startForegroundService(context, i)
         }
 
         fun command(context: Context, action: String) {

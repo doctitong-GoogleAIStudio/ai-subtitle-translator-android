@@ -15,6 +15,7 @@ import androidx.appcompat.widget.PopupMenu
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.cache.MovieRecord
+import com.aivicventures.subtitletranslator.live.AudioMode
 import com.aivicventures.subtitletranslator.live.LiveSession
 import com.google.android.material.R as M
 import com.google.android.material.button.MaterialButton
@@ -67,6 +68,17 @@ class MainActivity : ComponentActivity() {
             addFull(chips, 10)
         }, 8)
 
+        // Movie browser: websites' videos with English subtitles drawn inside the app.
+        col.addFull(card(16) {
+            addView(row(
+                iconBadge(R.drawable.ic_movie, M.attr.colorSecondaryContainer, M.attr.colorOnSecondaryContainer),
+                stack(heading(getString(R.string.browser_title)), caption(getString(R.string.browser_description))),
+            ))
+            addFull(tonalButton(getString(R.string.browser_open), R.drawable.ic_open_in_new) {
+                startActivity(Intent(this@MainActivity, BrowserActivity::class.java))
+            }, 12)
+        }, 12)
+
         // Live Floating Subtitles: English subtitles over videos playing in other apps.
         liveButton = tonalButton(getString(R.string.live_open), R.drawable.ic_closed_caption) {
             startActivity(Intent(this, LiveActivity::class.java))
@@ -87,7 +99,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         showStatus()
-        liveButton.text = getString(if (LiveSession.state.value.running) R.string.live_open_running else R.string.live_open)
+        val external = LiveSession.state.value.let { it.running && it.mode != AudioMode.PAGE }
+        liveButton.text = getString(if (external) R.string.live_open_running else R.string.live_open)
         showRecent()
     }
 

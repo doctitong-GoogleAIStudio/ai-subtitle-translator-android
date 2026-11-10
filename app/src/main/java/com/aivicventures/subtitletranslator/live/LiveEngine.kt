@@ -57,6 +57,7 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
         private set
     @Volatile private var source: LiveAudioSource? = null
     @Volatile private var nextSource: LiveAudioSource? = null
+    @Volatile private var resetSegmenter = false
     private var worker: Thread? = null
     private var capture: Thread? = null
     @Volatile private var asr: WhisperAsr? = null
@@ -95,6 +96,23 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
         segmenter.reset()
         timeline.clear()
         LiveSession.update { it.copy(phase = if (p) LiveSession.Phase.PAUSED else LiveSession.Phase.LISTENING, lines = emptyList()) }
+    }
+
+    /**
+     * The video jumped (seek) or restarted: what was heard and queued belongs to the old
+     * position, so it is dropped and the screen cleared; listening continues at once.
+     */
+    fun resync() {
+        Log.i(TAG, "resync")
+        synchronized(lock) {
+            finals.clear()
+            partial = null
+        }
+        PageAudioBus.clear()
+        // The segmenter belongs to the capture thread; it resets itself before its next push.
+        resetSegmenter = true
+        timeline.clear()
+        LiveSession.update { it.copy(lines = emptyList()) }
     }
 
     fun stop() {
@@ -265,6 +283,10 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
             while (running) {
                 val n = src.read(buf)
                 if (n < 0) break
+                if (resetSegmenter) {
+                    resetSegmenter = false
+                    segmenter.reset()
+                }
                 val events = segmenter.push(buf, 0, n)
                 if (!paused) events.forEach(::enqueue)
                 val t = SystemClock.elapsedRealtime()

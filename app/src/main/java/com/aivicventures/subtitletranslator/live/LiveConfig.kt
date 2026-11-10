@@ -10,10 +10,19 @@ enum class AudioMode {
     MICROPHONE,
 
     /** The microphone listening to a TV or another device; big subtitles in this app. */
-    SECOND_DEVICE;
+    SECOND_DEVICE,
 
-    val usesMicrophone: Boolean get() = this != INTERNAL
-    val usesOverlay: Boolean get() = this != SECOND_DEVICE
+    /** The built-in browser's video sound, tapped in the page; subtitles drawn in the browser.
+     *  No microphone, no screen capture, no foreground service. */
+    PAGE;
+
+    val usesMicrophone: Boolean get() = this == MICROPHONE || this == SECOND_DEVICE
+    val usesOverlay: Boolean get() = this == INTERNAL || this == MICROPHONE
+
+    companion object {
+        /** The sources offered on the Live screen (the page source lives in the browser). */
+        val EXTERNAL = listOf(INTERNAL, MICROPHONE, SECOND_DEVICE)
+    }
 }
 
 /**

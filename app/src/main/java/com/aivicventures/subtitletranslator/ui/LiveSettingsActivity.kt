@@ -93,14 +93,15 @@ class LiveSettingsActivity : ComponentActivity() {
 
         col.addFull(sectionTitle(getString(R.string.live_set_audio)))
         col.addFull(card(16) {
-            val modes = AudioMode.entries
+            val modes = AudioMode.EXTERNAL
             addFull(choice(getString(R.string.live_audio_source), modes.map {
                 getString(when (it) {
                     AudioMode.INTERNAL -> R.string.live_mode_internal
                     AudioMode.MICROPHONE -> R.string.live_mode_mic
                     AudioMode.SECOND_DEVICE -> R.string.live_mode_second
+                    AudioMode.PAGE -> R.string.browser_source_page
                 })
-            }, modes.indexOf(s.audioMode), null) { s.audioMode = modes[it] })
+            }, modes.indexOf(s.audioMode).coerceAtLeast(0), null) { s.audioMode = modes[it] })
             val ns = NoiseSuppressor.isAvailable()
             addFull(switchRow(getString(R.string.live_set_ns), getString(if (ns) R.string.live_set_ns_help else R.string.live_set_ns_none), s.noiseSuppression && ns, ns) {
                 s.noiseSuppression = it

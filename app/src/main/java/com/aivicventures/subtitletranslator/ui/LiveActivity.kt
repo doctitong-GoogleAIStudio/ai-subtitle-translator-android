@@ -87,8 +87,8 @@ class LiveActivity : ComponentActivity() {
             addFull(choice(getString(R.string.live_source_language), langs.map { it.second },
                 langs.indexOfFirst { it.first == live.sourceLanguage }.coerceAtLeast(0), null) { live.sourceLanguage = langs[it].first })
             addFull(choiceRow(getString(R.string.live_target_language), getString(R.string.live_english)) {}.apply { isClickable = false; background = null })
-            val modes = AudioMode.entries
-            addFull(choice(getString(R.string.live_audio_source), modes.map { modeName(it) }, modes.indexOf(live.audioMode), null) {
+            val modes = AudioMode.EXTERNAL
+            addFull(choice(getString(R.string.live_audio_source), modes.map { modeName(it) }, modes.indexOf(live.audioMode).coerceAtLeast(0), null) {
                 live.audioMode = modes[it]
                 modeHelp.text = modeHelpText(modes[it])
             })
@@ -162,6 +162,7 @@ class LiveActivity : ComponentActivity() {
             AudioMode.INTERNAL -> R.string.live_mode_internal
             AudioMode.MICROPHONE -> R.string.live_mode_mic
             AudioMode.SECOND_DEVICE -> R.string.live_mode_second
+            AudioMode.PAGE -> R.string.browser_source_page
         },
     )
 
@@ -170,6 +171,7 @@ class LiveActivity : ComponentActivity() {
             AudioMode.INTERNAL -> if (Build.VERSION.SDK_INT >= 29) R.string.live_mode_internal_help else R.string.live_error_internal_old
             AudioMode.MICROPHONE -> R.string.live_mode_mic_help
             AudioMode.SECOND_DEVICE -> R.string.live_mode_second_help
+            AudioMode.PAGE -> R.string.live_notif_page
         },
     )
 
@@ -273,6 +275,7 @@ class LiveActivity : ComponentActivity() {
                         AudioMode.INTERNAL -> R.string.live_consent_internal
                         AudioMode.MICROPHONE -> R.string.live_consent_mic
                         AudioMode.SECOND_DEVICE -> R.string.live_consent_second
+                        AudioMode.PAGE -> R.string.live_notif_page
                     },
                 ),
             )
@@ -327,6 +330,8 @@ class LiveActivity : ComponentActivity() {
                 LiveSubtitleService.start(this, AudioMode.SECOND_DEVICE)
                 startActivity(Intent(this, SecondDeviceActivity::class.java))
             }
+            // The page source is started from the built-in browser, next to the video.
+            AudioMode.PAGE -> startActivity(Intent(this, BrowserActivity::class.java))
         }
     }
 
