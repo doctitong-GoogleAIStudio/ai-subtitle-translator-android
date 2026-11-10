@@ -34,12 +34,11 @@ One phone is enough to start. Each extra phone class makes the defaults safer.
 - **Install the APK:**
 
   ```bash
-  adb install -r "AI-Subtitle-Translator-universal v1.1.4.apk"
+  adb install -r "AI-Subtitle-Translator-universal v1.2.0.apk"
   ```
 
 - **In the app:**
-  1. Open the Model Manager and download **Whisper small**. Download Whisper base too if you
-     want the second model compared.
+  1. Nothing to download: every model is built in.
   2. Leave Settings at their defaults.
 - **Copy the test movies:**
   1. Run `bash scripts/device_bench.sh quick`. It copies the three FLEURS test movies to
@@ -163,6 +162,47 @@ can be applied without arguing over noise.
 
 - Copy the `results.md` table into the README's results section, with the phone and SoC
   name, then apply the decisions above as one change with its unit tests.
+
+## Built-in browser and floating subtitles (1.2.0)
+
+No PC or script needed: these are checks by hand on the phone. Send the notes and the
+copied session reports. Use a video you are allowed to watch. Never use the app to get
+around DRM or a site's rules.
+
+### Browser
+
+1. Main screen, **Open the browser**. Open a page with an ordinary video. Public-domain
+   films on archive.org are a good start.
+2. Play the video, tap **Start AI subtitles**, and note:
+   - which source the button shows (Captions, Video sound, …);
+   - whether English appears, and roughly how late;
+   - whether "Tap the video once…" appeared.
+3. Seek forward and back, pause, then go full screen and turn the phone. Note whether the
+   subtitles follow.
+4. On a video with captions in another language, set **Smart Delay** to 10 s and note
+   whether the video waits, then plays on.
+5. Try one big streaming site. It is expected to refuse the video's sound (cross-site or
+   DRM). Note what the app says.
+
+### Floating subtitles
+
+1. Main screen, **Open Live Subtitles**, source **Internal audio**, **Start live
+   subtitles**. Allow what the app asks, then switch to YouTube or another video app and
+   play a video in a foreign language for 10 minutes.
+2. Note:
+   - whether the CC button and the subtitles appear;
+   - whether they are readable and roughly how late they are;
+   - whether a notice such as "no sound yet" or "the phone is busy" appears;
+   - whether the phone gets warm.
+3. Tap the CC button, **Stop**. Back in the Live screen, **Last session report**, **Copy
+   report**, and paste it into the notes. It holds timings and counts only.
+4. Repeat with **Microphone**, with the video playing on another device or a TV.
+
+The reports answer most of "what went wrong":
+- **Sound heard near 0 %:** no audio reached the app.
+- **Many "too late" lines with busy near 100 %:** the phone is too slow for the chosen
+  model.
+- **"Floating subtitles: not shown":** the phone refused the overlay.
 
 ## Optional: real battery drain
 
