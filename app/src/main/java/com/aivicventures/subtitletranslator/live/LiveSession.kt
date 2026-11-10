@@ -22,14 +22,18 @@ object LiveSession {
         val hearing: Boolean = false,
         /** Media is playing but the capture gets only digital silence: the app does not allow capture. */
         val captureBlocked: Boolean = false,
+        /** Listening for a while without any sound above silence (the video may not be playing). */
+        val noSound: Boolean = false,
         val recognising: Boolean = false,
         val overlayActive: Boolean = false,
         /** Most frequent language of the recent lines, its share ("8 of 10"). */
         val language: String = "",
         val languageCount: Int = 0,
         val languageOf: Int = 0,
-        /** Lines were skipped because recognition is slower than the speech. */
+        /** Lines were skipped recently because recognition is slower than the speech. */
         val fallingBehind: Boolean = false,
+        /** Provisional lines are paused to keep up (the phone is busy or warm). */
+        val provisionalPaused: Boolean = false,
         val noiseSuppressor: Boolean = false,
         val error: String? = null,
         /** A non-error message, e.g. why the session ended. */

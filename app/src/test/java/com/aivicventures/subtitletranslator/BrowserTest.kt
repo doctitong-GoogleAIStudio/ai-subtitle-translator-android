@@ -117,4 +117,44 @@ class BrowserTest {
         assertNull(PageAudioBus.poll(0))
         assertNotNull(PageAudioBus)
     }
+
+    @Test
+    fun splitSentencesAreTranslatedTogether() {
+        val cues = listOf(
+            Cue(1.0, 3.0, "Le dije que"),
+            Cue(3.1, 5.0, "nos iríamos mañana."),
+            Cue(5.5, 7.0, "- ¿Por qué?"),
+            Cue(7.1, 9.0, "- Porque llueve"),
+            Cue(12.0, 14.0, "y hace frío."),
+        )
+        val all = { _: Cue -> true }
+        assertEquals(cues.subList(0, 2), Captions.sentenceAt(cues, 0, all))
+        // A finished sentence stands alone; a dialogue dash starts a new one.
+        assertEquals(cues.subList(2, 3), Captions.sentenceAt(cues, 2, all))
+        // Three seconds of gap: not the same sentence.
+        assertEquals(cues.subList(3, 4), Captions.sentenceAt(cues, 3, all))
+        // A cue that is already translated is not taken again.
+        assertEquals(cues.subList(0, 1), Captions.sentenceAt(cues, 0, { it != cues[1] }))
+        // Overlapping cues are two lines on screen, not one sentence.
+        val overlap = listOf(Cue(1.0, 4.0, "Hola"), Cue(2.0, 5.0, "amigo"))
+        assertEquals(1, Captions.sentenceAt(overlap, 0, all).size)
+        assertEquals(true, Captions.endsSentence("¿Vienes?”"))
+        assertEquals("今日は雨です", Captions.joinSentence(listOf("今日は", "雨です"), "ja"))
+        assertEquals("Le dije que nos iríamos", Captions.joinSentence(listOf("Le dije que", "nos iríamos"), "es"))
+    }
+
+    @Test
+    fun englishIsSharedOverTheCues() {
+        val parts = Captions.splitSentence("I told him that we would leave tomorrow morning.", listOf(10, 20))
+        assertEquals(2, parts.size)
+        assertEquals("I told him that we would leave tomorrow morning.", parts.joinToString(" "))
+        assertEquals("I told him that", parts[0])
+        // A comma near the share point is preferred.
+        assertEquals(listOf("When it rains,", "we stay at home and read."), Captions.splitSentence("When it rains, we stay at home and read.", listOf(12, 12)))
+        // Fewer words than cues: each cue shows the whole sentence.
+        assertEquals(listOf("Yes.", "Yes.", "Yes."), Captions.splitSentence("Yes.", listOf(3, 3, 3)))
+        assertEquals(listOf("Fine."), Captions.splitSentence(" Fine. ", listOf(5)))
+        val three = Captions.splitSentence("one two three four five six", listOf(1, 1, 1))
+        assertEquals(listOf("one two", "three four", "five six"), three)
+    }
 }

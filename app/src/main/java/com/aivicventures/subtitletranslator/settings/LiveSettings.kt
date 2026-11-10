@@ -108,6 +108,11 @@ class LiveSettings(context: Context) {
         get() = prefs.getBoolean("bubble_left", false)
         set(v) = prefs.edit().putBoolean("bubble_left", v).apply()
 
+    /** Timing-only report of the last session ([com.aivicventures.subtitletranslator.live.LiveReport]); empty before the first. */
+    var lastReport: String
+        get() = prefs.getString("last_report", "") ?: ""
+        set(v) = prefs.edit().putString("last_report", v).apply()
+
     fun appearance() = Appearance(sizeSp, COLORS[colorIndex].second, bold, outline, backgroundPercent, position, maxLines)
 
     companion object {

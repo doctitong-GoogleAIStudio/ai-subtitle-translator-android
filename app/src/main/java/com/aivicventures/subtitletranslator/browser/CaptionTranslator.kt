@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import com.aivicventures.subtitletranslator.app
+import com.aivicventures.subtitletranslator.live.ContextMemory
 import com.aivicventures.subtitletranslator.translate.M2M100Translator
 import com.aivicventures.subtitletranslator.translate.TranslatorNative
 import java.util.concurrent.ConcurrentHashMap
@@ -13,6 +14,11 @@ import java.util.concurrent.ConcurrentHashMap
  * video: the cues from the current position onward first, so the timestamps of the original
  * captions are kept exactly and nothing has to be recognised from sound. One worker thread;
  * the model is loaded on first use and freed by [close].
+ *
+ * Context: a sentence the captions split over several cues is translated as one sentence
+ * and its English shared out over those cues ([Captions.sentenceAt]); names seen in the
+ * English are kept to one spelling ([ContextMemory.harmonize]). Both live only as long as
+ * this object.
  */
 class CaptionTranslator(
     context: Context,
@@ -57,6 +63,10 @@ class CaptionTranslator(
     @Volatile var translatedCount = 0
         private set
     private var mt: M2M100Translator? = null
+    private val memory = ContextMemory(maxLines = 4)
+    /** Sentences translated from more than one cue (diagnostics). */
+    @Volatile var mergedSentences = 0
+        private set
     private val worker = Thread(::run, "caption-mt").apply { start() }
 
     fun add(list: List<Cue>) {
@@ -90,13 +100,20 @@ class CaptionTranslator(
 
     fun readyAhead(now: Double, horizon: Double): Double = Captions.readyAhead(snapshot(), ::isTranslated, now, horizon)
 
-    private fun nextBatch(): List<Cue> {
+    /** Up to [BATCH] sentences (each one or more cues) from the current position on. */
+    private fun nextBatch(): List<List<Cue>> {
         val from = position - 1.0
-        val out = ArrayList<Cue>(BATCH)
-        for (c in cues) {
-            if (c.end < from || english.containsKey(c)) continue
-            out += c
-            if (out.size == BATCH) break
+        val out = ArrayList<List<Cue>>(BATCH)
+        var i = 0
+        while (i < cues.size && out.size < BATCH) {
+            val c = cues[i]
+            if (c.end < from || english.containsKey(c)) {
+                i++
+                continue
+            }
+            val sentence = Captions.sentenceAt(cues, i, { !english.containsKey(it) })
+            out += sentence
+            i += sentence.size
         }
         return out
     }
@@ -104,7 +121,7 @@ class CaptionTranslator(
     private fun run() {
         try {
             while (!closed) {
-                var batch: List<Cue>
+                var batch: List<List<Cue>>
                 synchronized(lock) {
                     batch = nextBatch()
                     while (!closed && batch.isEmpty()) {
@@ -127,7 +144,8 @@ class CaptionTranslator(
         }
     }
 
-    private fun translate(batch: List<Cue>) {
+    private fun translate(sentences: List<List<Cue>>) {
+        val batch = sentences.flatten()
         val lang = language ?: Captions.guessLanguage(snapshot().take(40).map { it.text })
             ?: appContext.app.liveSettings.sourceLanguage.takeIf { it != "auto" }
         language = lang
@@ -145,18 +163,23 @@ class CaptionTranslator(
         }
         state = State.TRANSLATING
         val t0 = SystemClock.elapsedRealtime()
-        val out = runCatching { m.translate(batch.map { it.text }, lang!!, beam) }
+        val out = runCatching { m.translate(sentences.map { s -> Captions.joinSentence(s.map { it.text }, lang) }, lang!!, beam) }
             .onFailure { Log.w(TAG, "caption translation failed", it) }.getOrNull()
         val ms = SystemClock.elapsedRealtime() - t0
-        if (out == null || out.size != batch.size) {
+        if (out == null || out.size != sentences.size) {
             batch.forEach { english[it] = it.text }
             return
         }
-        batch.forEachIndexed { i, c -> english[c] = out[i] }
+        for ((k, s) in sentences.withIndex()) {
+            val text = memory.harmonize(out[k].trim())
+            memory.add(s.first().start, "", text, lang ?: "")
+            if (s.size > 1) mergedSentences++
+            Captions.splitSentence(text, s.map { it.text.length }).forEachIndexed { i, part -> english[s[i]] = part }
+        }
         translatedCount += batch.size
         val per = ms / batch.size
         msPerCue = if (msPerCue == 0L) per else (msPerCue * 3 + per) / 4
-        Log.i(TAG, "captions $lang: ${batch.size} cues in $ms ms (beam $beam)")
+        Log.i(TAG, "captions $lang: ${batch.size} cues in ${sentences.size} sentences, $ms ms (beam $beam)")
     }
 
     private var modelTried = false

@@ -21,7 +21,7 @@ import android.os.PowerManager
  * thread limit yet, to put off the point where the phone slows itself down.
  */
 class PowerMonitor(private val context: Context, private val batterySaverSetting: Boolean) {
-    data class State(val saving: Boolean, val critical: Boolean, val reason: String, val warm: Boolean = saving) {
+    data class State(val saving: Boolean, val critical: Boolean, val reason: String, val warm: Boolean = saving, val thermal: Int = 0) {
         /** Threads for the next job, from the user's setting. */
         fun threads(base: Int): Int = when {
             critical -> 1
@@ -62,7 +62,7 @@ class PowerMonitor(private val context: Context, private val batterySaverSetting
                 else -> ""
             }
             val saving = reason.isNotEmpty()
-            return State(saving = saving, critical = critical, reason = reason, warm = saving || thermal >= THERMAL_MODERATE)
+            return State(saving = saving, critical = critical, reason = reason, warm = saving || thermal >= THERMAL_MODERATE, thermal = thermal)
         }
     }
 }

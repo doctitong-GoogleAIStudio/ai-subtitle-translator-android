@@ -25,6 +25,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.aivicventures.subtitletranslator.BuildConfig
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
 import com.aivicventures.subtitletranslator.ui.BrowserActivity
@@ -53,6 +54,11 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
     /** Started by the built-in browser, which shows the subtitles itself. */
     private var inApp = false
     private var lastStartId = 0
+    private var testThreads = 0
+    private var testAdaptive = true
+    private var startedAtMs = 0L
+    /** The floating window was seen on screen at least once in this session (for the report). */
+    private var overlaySeen = false
     private var shownIds = HashSet<Long>()
     private var lastLines: List<LiveSession.Line> = emptyList()
     private var lastStatsAt = 0L
@@ -85,6 +91,10 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
         mode = runCatching { AudioMode.valueOf(intent.getStringExtra(EXTRA_MODE)!!) }.getOrDefault(AudioMode.MICROPHONE)
         inApp = intent.getBooleanExtra(EXTRA_IN_APP, false)
         val testFile = intent.getStringExtra(EXTRA_TEST_FILE)
+        testThreads = intent.getIntExtra(EXTRA_TEST_THREADS, 0)
+        testAdaptive = intent.getBooleanExtra(EXTRA_TEST_ADAPTIVE, true)
+        startedAtMs = SystemClock.elapsedRealtime()
+        overlaySeen = false
         active = this
         LiveSession.update { LiveSession.State(phase = LiveSession.Phase.STARTING, mode = mode, quality = app.liveSettings.quality) }
         if (mode == AudioMode.PAGE) {
@@ -138,11 +148,17 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
         // In the built-in browser the subtitles are drawn over the video there, not floating.
         if (mode.usesOverlay && !inApp) {
             if (!Settings.canDrawOverlays(this)) return fail(getString(R.string.live_error_overlay_denied))
-            overlay = SubtitleOverlay(this, this).also { it.show() }
+            overlay = try {
+                SubtitleOverlay(this, this).also { it.show() }
+            } catch (e: Exception) {
+                // Some phone skins refuse the window even with the permission granted.
+                Log.e(TAG, "overlay refused", e)
+                return fail(getString(R.string.live_error_overlay_refused))
+            }
         }
         getSharedPreferences("live", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsListener)
         shownIds.clear()
-        engine = LiveEngine(this, mode).also { it.start(source) }
+        engine = LiveEngine(this, mode, testThreads, testAdaptive).also { it.start(source) }
         LiveSession.update { it.copy(overlayActive = overlay != null) }
         collector = scope.launch {
             LiveSession.state.collect { s ->
@@ -161,13 +177,51 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
 
     private fun fail(message: String) {
         LiveSession.update { it.copy(phase = LiveSession.Phase.ERROR, error = message) }
+        saveReport(engine, getString(R.string.live_report_error, message))
         teardown()
+    }
+
+    /** Keeps the timing-only [LiveReport] of the session that is ending, for the Live screen. */
+    private fun saveReport(e: LiveEngine?, ending: String) {
+        runCatching {
+            val s = LiveSession.state.value
+            val nowMs = SystemClock.elapsedRealtime()
+            val lag = e?.stats?.lagSpread()
+            val facts = LiveReport.Facts(
+                app = "AI Subtitle Translator ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                device = "${Build.MANUFACTURER} ${Build.MODEL}",
+                android = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                cores = Runtime.getRuntime().availableProcessors(),
+                ramMb = app.models.deviceMemoryMb(),
+                mode = mode,
+                quality = app.liveSettings.quality,
+                model = s.model,
+                translator = s.translator,
+                threads = e?.threads ?: app.settings.threads,
+                overlayAllowed = Settings.canDrawOverlays(this),
+                overlayShown = overlaySeen,
+                durationSec = (nowMs - startedAtMs) / 1000.0,
+                usage = e?.stats?.usage(nowMs, e.timeline.droppedLate),
+                lagMedianMs = lag?.first,
+                lagMaxMs = lag?.second,
+                shownLines = e?.stats?.shownCount ?: 0,
+                counters = e?.counters,
+                ending = ending,
+            )
+            app.liveSettings.lastReport = LiveReport.text(facts)
+        }.onFailure { Log.w(TAG, "report", it) }
     }
 
     /** Ends the session; [notice] says why when it was not the user's Stop. */
     private fun stopSession(notice: String?) {
         val e = engine
         val usage = e?.let { it.stats.usage(SystemClock.elapsedRealtime(), it.timeline.droppedLate) }
+        val error = LiveSession.state.value.error.takeIf { LiveSession.state.value.phase == LiveSession.Phase.ERROR }
+        if (e != null) saveReport(e, when {
+            error != null -> getString(R.string.live_report_error, error)
+            notice != null -> notice
+            else -> getString(R.string.live_report_stopped)
+        })
         teardown()
         LiveSession.update {
             if (it.phase == LiveSession.Phase.ERROR) it.copy(lines = emptyList(), captureActive = false, overlayActive = false)
@@ -198,6 +252,7 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
 
     private fun onTick() {
         val e = engine ?: return
+        if (!overlaySeen && overlay?.onScreen == true) overlaySeen = true
         val now = e.now()
         val visible = e.timeline.visible(now)
         val nowMs = SystemClock.elapsedRealtime()
@@ -333,6 +388,8 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
         const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_TEST_FILE = "test_file"
         const val EXTRA_IN_APP = "in_app"
+        const val EXTRA_TEST_THREADS = "test_threads"
+        const val EXTRA_TEST_ADAPTIVE = "test_adaptive"
 
         /** The running service (main thread only). */
         private var active: LiveSubtitleService? = null
@@ -348,14 +405,14 @@ class LiveSubtitleService : Service(), SubtitleOverlay.Actions {
          */
         fun start(
             context: Context, mode: AudioMode, resultCode: Int = 0, resultData: Intent? = null,
-            testFile: String? = null, inApp: Boolean = false,
+            testFile: String? = null, inApp: Boolean = false, testThreads: Int = 0, testAdaptive: Boolean = true,
         ) {
             val i = Intent(context, LiveSubtitleService::class.java).setAction(ACTION_START)
                 .putExtra(EXTRA_MODE, mode.name)
                 .putExtra(EXTRA_RESULT_CODE, resultCode)
                 .putExtra(EXTRA_IN_APP, inApp)
             if (resultData != null) i.putExtra(EXTRA_RESULT_DATA, resultData)
-            if (testFile != null) i.putExtra(EXTRA_TEST_FILE, testFile)
+            if (testFile != null) i.putExtra(EXTRA_TEST_FILE, testFile).putExtra(EXTRA_TEST_THREADS, testThreads).putExtra(EXTRA_TEST_ADAPTIVE, testAdaptive)
             // The page source runs only while the browser is on screen: a plain service is enough.
             if (mode == AudioMode.PAGE && testFile == null) context.startService(i)
             else ContextCompat.startForegroundService(context, i)

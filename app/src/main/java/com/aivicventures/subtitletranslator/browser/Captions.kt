@@ -115,4 +115,89 @@ object Captions {
 
     /** Smart Delay targets offered in the browser, in seconds (0 = off). */
     val SMART_DELAY_CHOICES = listOf(0, 5, 10, 15, 20, 30)
+
+    private val SENTENCE_END = ".!?…。！？♪"
+    private val CLOSERS = "\"'”’»)]」』"
+    private val NO_SPACE_LANGUAGES = setOf("ja", "zh")
+
+    /** [text] ends a sentence (closing quotes and brackets aside). */
+    fun endsSentence(text: String): Boolean {
+        val t = text.trimEnd().trimEnd { it in CLOSERS }
+        return t.isEmpty() || t.last() in SENTENCE_END
+    }
+
+    /** A dialogue dash: a new speaker starts, so the cue begins its own sentence. */
+    fun startsSpeaker(text: String): Boolean = text.trimStart().let { it.startsWith("-") || it.startsWith("–") || it.startsWith("—") }
+
+    /**
+     * Sentences split over several cues ("I told him that" / "we would leave tomorrow.") are
+     * translated together, because a half sentence translates badly on its own. From index
+     * [from] of [cues] (sorted, all untranslated as far as [usable] says), the cues that belong
+     * to the same sentence: consecutive, at most [maxGap] s apart, no new speaker, at most
+     * [maxCues] cues and [maxChars] characters.
+     */
+    fun sentenceAt(cues: List<Cue>, from: Int, usable: (Cue) -> Boolean, maxCues: Int = 3, maxChars: Int = 220, maxGap: Double = 1.5): List<Cue> {
+        val out = arrayListOf(cues[from])
+        var chars = cues[from].text.length
+        var i = from + 1
+        while (out.size < maxCues && i < cues.size) {
+            val last = out.last()
+            val next = cues[i]
+            if (endsSentence(last.text) || startsSpeaker(next.text) || !usable(next)) break
+            // Overlapping cues are two lines on screen at once (often two speakers), not one sentence.
+            if (next.start < last.end - 0.05 || next.start - last.end > maxGap) break
+            if (chars + next.text.length > maxChars) break
+            out += next
+            chars += next.text.length + 1
+            i++
+        }
+        return out
+    }
+
+    /** The cue texts of one sentence as one line for translation. */
+    fun joinSentence(texts: List<String>, language: String?): String =
+        if (language in NO_SPACE_LANGUAGES) texts.joinToString("") { it.trim() } else texts.joinToString(" ") { it.trim() }
+
+    /**
+     * The English of a sentence shared out over its [weights] (source lengths of its cues):
+     * cut at word boundaries near the same share of the text, preferring a cut after
+     * punctuation close by. Each part gets at least one word while there are words left.
+     */
+    fun splitSentence(english: String, weights: List<Int>): List<String> {
+        val n = weights.size
+        if (n <= 1) return listOf(english.trim())
+        val words = english.trim().split(SPACE).filter { it.isNotEmpty() }
+        // Too few words to share: each cue shows the whole (short) sentence.
+        if (words.size < n) return List(n) { english.trim() }
+        val total = weights.sumOf { it.coerceAtLeast(1) }.toDouble()
+        val charsBefore = IntArray(words.size + 1)
+        for (k in words.indices) charsBefore[k + 1] = charsBefore[k] + words[k].length + 1
+        val len = charsBefore[words.size].toDouble()
+        val cuts = ArrayList<Int>()
+        var acc = 0.0
+        var prev = 0
+        for (k in 0 until n - 1) {
+            acc += weights[k].coerceAtLeast(1)
+            val target = acc / total * len
+            // Candidate cut positions: after word j (1..), leaving room for the remaining parts.
+            val lo = prev + 1
+            val hi = words.size - (n - 1 - k)
+            var best = lo
+            var bestCost = Double.MAX_VALUE
+            for (j in lo..hi) {
+                var cost = kotlin.math.abs(charsBefore[j] - target) / len
+                val w = words[j - 1]
+                if (w.last() in ",;:" || w.trimEnd { it in CLOSERS }.lastOrNull()?.let { it in SENTENCE_END } == true) cost -= 0.08
+                if (cost < bestCost) {
+                    bestCost = cost
+                    best = j
+                }
+            }
+            cuts += best
+            prev = best
+        }
+        cuts += words.size
+        var start = 0
+        return cuts.map { end -> words.subList(start, end).joinToString(" ").also { start = end } }
+    }
 }

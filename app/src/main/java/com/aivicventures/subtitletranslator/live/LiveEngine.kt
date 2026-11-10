@@ -32,13 +32,24 @@ fun interface LineTranslator {
  * oldest waiting lines are dropped rather than shown late. Everything stays in memory and
  * is gone when the session stops.
  */
-class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
+class LiveEngine(
+    private val context: Context,
+    @Volatile var mode: AudioMode,
+    /** Test hook: recognition threads instead of the setting (0 = setting). */
+    private val threadsOverride: Int = 0,
+    /** Test hook: false keeps provisional lines on however busy the phone is (the 1.1.0 behaviour). */
+    private val adaptive: Boolean = true,
+) {
     private val live = context.app.liveSettings
     private val player = context.app.settings
     val quality = live.quality
     private val language = live.sourceLanguage
     val timeline = SubtitleTimeline(live.delaySec.toDouble(), live.maxLines)
     val stats = LiveStats()
+    /** Timing-only counters for the session report ([LiveReport]). */
+    val counters = LiveReport.Counters()
+    /** Recognition threads in use (from the setting or the test hook). */
+    val threads: Int get() = if (threadsOverride in 1..8) threadsOverride else player.threads
     private val memory = ContextMemory(quality.contextLines)
     private val useContext = live.contextMemory
     private val shortContext = live.shortContext
@@ -64,6 +75,19 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
     private var startedAt = 0L
     @Volatile var lastSpeechAt = 0L
         private set
+
+    /**
+     * Provisional decodes (the line still being spoken) roughly double Whisper's work. On a
+     * slow or warm phone that work makes the final lines late, and late lines are dropped, so
+     * they are paused while recognition is busy, the phone is warm or finished lines wait,
+     * and come back once it has been calm for [RECOVER_MS].
+     */
+    @Volatile var provisionalOn = quality.partialEverySec > 0
+        private set
+    private var provisionalOffAt = 0L
+    /** (end, work) in ms of recent recognition jobs; recognition thread only. */
+    private val work = ArrayDeque<Pair<Long, Long>>()
+    @Volatile private var lastDropAt = 0L
 
     /** Session clock in seconds (the timeline's time base). */
     fun now(): Double = (SystemClock.elapsedRealtime() - startedAt) / 1000.0
@@ -138,7 +162,7 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
             val vad = models.vadModel()
             if (spec == null || vad == null) error("The speech models are missing from this build.")
             LiveSession.update { it.copy(phase = LiveSession.Phase.LOADING, model = spec.name) }
-            val threads = player.threads
+            val threads = this.threads
             val a = models.weights(spec).use { WhisperAsr(context, it, models.localFile(vad.files.first()).path, spec.id) }
             asr = a
             val useMt = when (live.translator) {
@@ -161,7 +185,12 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
             val power = PowerMonitor(context, player.batterySaver)
             while (running) {
                 val job = take() ?: break
-                process(a, translator, job, power, threads)
+                val ps = power.state()
+                val w0 = SystemClock.elapsedRealtime()
+                process(a, translator, job, ps, threads)
+                noteWork(w0, SystemClock.elapsedRealtime(), ps)
+                // Very hot: give the phone time to cool between lines.
+                if (ps.critical && running) Thread.sleep(COOL_DOWN_MS)
             }
         } catch (e: Throwable) {
             Log.e(TAG, "live engine failed", e)
@@ -178,23 +207,51 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
             finals.removeFirstOrNull()?.let { return it }
             partial?.let {
                 partial = null
-                return it
+                if (provisionalOn) return it
+                counters.provisionalSkipped++
             }
             lock.wait(500)
         }
         null
     }
 
-    private fun process(a: WhisperAsr, translator: LineTranslator?, job: Job, power: PowerMonitor, baseThreads: Int) {
+    /** Share of the last [BUSY_WINDOW_MS] spent recognising; switches provisional lines off and on. */
+    private fun noteWork(start: Long, end: Long, ps: PowerMonitor.State) {
+        work.addLast(end to end - start)
+        while (work.isNotEmpty() && work.first().first < end - BUSY_WINDOW_MS) work.removeFirst()
+        val span = (end - startedAt).coerceIn(MIN_SPAN_MS, BUSY_WINDOW_MS)
+        val busy = (work.sumOf { it.second }.toDouble() / span).coerceAtMost(1.0)
+        counters.worked(busy, ps.warm, ps.thermal, ps.reason)
+        if (lastDropAt > 0 && end - lastDropAt > BEHIND_CLEAR_MS) {
+            lastDropAt = 0
+            LiveSession.update { it.copy(fallingBehind = false) }
+        }
+        if (!adaptive || quality.partialEverySec <= 0) return
+        val waiting = synchronized(lock) { finals.size }
+        if (provisionalOn && (ps.warm || busy > BUSY_HIGH || waiting > 1)) {
+            provisionalOn = false
+            provisionalOffAt = end
+            counters.provisionalOff++
+            Log.i(TAG, "provisional off: busy %.0f %%, waiting %d, warm %s".format(Locale.ROOT, busy * 100, waiting, ps.warm))
+            LiveSession.update { it.copy(provisionalPaused = true) }
+        } else if (!provisionalOn && !ps.warm && busy < BUSY_LOW && waiting == 0 && end - provisionalOffAt > RECOVER_MS) {
+            provisionalOn = true
+            Log.i(TAG, "provisional on: busy %.0f %%".format(Locale.ROOT, busy * 100))
+            LiveSession.update { it.copy(provisionalPaused = false) }
+        }
+    }
+
+    private fun process(a: WhisperAsr, translator: LineTranslator?, job: Job, ps: PowerMonitor.State, baseThreads: Int) {
         val e = job.event
         val provisional = e is UtteranceSegmenter.Partial
         if (paused) return
         if (!provisional && now() - e.endSec > timeline.maxLagSec) {
             stats.backlogDropped()
+            lastDropAt = SystemClock.elapsedRealtime()
+            LiveSession.update { it.copy(fallingBehind = true) }
             return
         }
         val queueMs = SystemClock.elapsedRealtime() - job.queuedAt
-        val ps = power.state()
         LiveSession.update { it.copy(recognising = true) }
         val t0 = SystemClock.elapsedRealtime()
         val prompt: ((String, Boolean) -> String?)? = if (useContext) { lang, english -> memory.prompt(lang, english, e.startSec) } else null
@@ -237,8 +294,6 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
         } else {
             stats.ready(e.id, job.endpointMs, queueMs, t1 - t0, t2 - t1, segs.any { !it.english })
         }
-        // Very hot: give the phone time to cool between lines.
-        if (ps.critical) Thread.sleep(COOL_DOWN_MS)
     }
 
     /** English for each segment: as recognised when Whisper already gave English, else via [translator]. */
@@ -263,6 +318,7 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
     private fun captureMain() {
         val buf = FloatArray(RecordSource.RATE / 10)
         var lastCheck = 0L
+        var quietSince = SystemClock.elapsedRealtime()
         while (running) {
             val src = nextSource?.also {
                 nextSource = null
@@ -291,11 +347,18 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
                 if (!paused) events.forEach(::enqueue)
                 val t = SystemClock.elapsedRealtime()
                 if (t - lastCheck >= 500) {
+                    val dt = if (lastCheck == 0L) 0.0 else (t - lastCheck) / 1000.0
                     lastCheck = t
                     val hearing = segmenter.levelDb > HEARING_DB
                     // Media is playing, yet only exact zeros arrive: the playing app does not allow capture.
                     val blocked = mode == AudioMode.INTERNAL && segmenter.digitalSilenceSec >= BLOCKED_SEC && audio.isMusicActive
-                    LiveSession.update { s -> if (s.hearing == hearing && s.captureBlocked == blocked) s else s.copy(hearing = hearing, captureBlocked = blocked) }
+                    if (hearing || paused) quietSince = t
+                    val noSound = !blocked && t - quietSince >= NO_SOUND_MS
+                    if (!paused) counters.listened(dt, hearing, blocked)
+                    LiveSession.update { s ->
+                        if (s.hearing == hearing && s.captureBlocked == blocked && s.noSound == noSound) s
+                        else s.copy(hearing = hearing, captureBlocked = blocked, noSound = noSound)
+                    }
                 }
             }
             if (nextSource != null) continue
@@ -320,6 +383,7 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
                     }
                     if (dropped > 0) {
                         stats.backlogDropped(dropped)
+                        lastDropAt = SystemClock.elapsedRealtime()
                         LiveSession.update { it.copy(fallingBehind = true) }
                     }
                 }
@@ -335,6 +399,13 @@ class LiveEngine(private val context: Context, @Volatile var mode: AudioMode) {
         private const val HEARING_DB = -60.0
         private const val BLOCKED_SEC = 4.0
         private const val COOL_DOWN_MS = 1500L
+        private const val NO_SOUND_MS = 8000L
+        private const val BUSY_WINDOW_MS = 30_000L
+        private const val MIN_SPAN_MS = 10_000L
+        private const val BUSY_HIGH = 0.8
+        private const val BUSY_LOW = 0.4
+        private const val RECOVER_MS = 30_000L
+        private const val BEHIND_CLEAR_MS = 20_000L
         /** Automatic choice for live use: the largest model up to this size, for speed. */
         private const val AUTO_MAX_RAM_MB = 300
 

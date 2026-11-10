@@ -192,12 +192,21 @@ class SubtitleOverlay(service: Context, private val actions: Actions) {
         applyAppearance()
         layoutBubble()
         bubbleRoot.addView(bubble, LinearLayout.LayoutParams(bubbleSize, bubbleSize))
-        wm.addView(subtitleBox, subParams)
-        wm.addView(bubbleRoot, bubbleParams)
+        try {
+            wm.addView(subtitleBox, subParams)
+            wm.addView(bubbleRoot, bubbleParams)
+        } catch (e: RuntimeException) {
+            runCatching { wm.removeView(subtitleBox) }
+            bubbleRoot.removeView(bubble)
+            throw e
+        }
         installBubbleTouch()
         shown = true
         wake()
     }
+
+    /** Android really put the floating button on screen (some phone skins refuse overlays quietly). */
+    val onScreen: Boolean get() = shown && bubbleRoot.isAttachedToWindow && bubbleRoot.windowVisibility == View.VISIBLE
 
     fun remove() {
         if (!shown) return
@@ -257,6 +266,8 @@ class SubtitleOverlay(service: Context, private val actions: Actions) {
             blocked -> ctx.getString(R.string.live_blocked_short)
             s.phase == LiveSession.Phase.LOADING -> ctx.getString(R.string.live_phase_loading)
             s.phase == LiveSession.Phase.PAUSED -> ctx.getString(R.string.live_phase_paused)
+            s.noSound -> ctx.getString(if (s.mode == AudioMode.INTERNAL) R.string.live_no_sound_internal else R.string.live_no_sound_mic)
+            s.fallingBehind -> ctx.getString(R.string.live_behind_short)
             else -> null
         }
         if (newNotice != notice) {

@@ -217,4 +217,37 @@ class LiveTest {
         assertEquals(0.0, u.estimatedCost, 0.0)
         assertTrue(abs(u.droppedLate - 1) == 0)
     }
+
+    @Test
+    fun sessionReportHasTimingsOnly() {
+        val stats = LiveStats().apply { start(0) }
+        for (id in 1L..5L) {
+            stats.ready(id, 500, 0, 800, 400, true)
+            stats.shown(id, 0, id * 1000)
+        }
+        assertEquals(3000L to 5000L, stats.lagSpread())
+        assertEquals(5, stats.shownCount)
+        val c = com.aivicventures.subtitletranslator.live.LiveReport.Counters().apply {
+            listened(10.0, true, false)
+            listened(10.0, false, true)
+            worked(0.5, false, 0, "")
+            worked(0.9, true, 3, "phone is hot")
+        }
+        val text = com.aivicventures.subtitletranslator.live.LiveReport.text(
+            com.aivicventures.subtitletranslator.live.LiveReport.Facts(
+                app = "App 1.2.0 (8)", device = "Maker Phone", android = "Android 14 (API 34)", cores = 8, ramMb = 6144,
+                mode = com.aivicventures.subtitletranslator.live.AudioMode.INTERNAL, quality = Quality.FAST, model = "base",
+                translator = "M2M100", threads = 4, overlayAllowed = true, overlayShown = true, durationSec = 754.0,
+                usage = stats.usage(754_000, 2), lagMedianMs = 3000, lagMaxMs = 5000, shownLines = 5, counters = c, ending = "stopped by the user",
+            ),
+        )
+        assertTrue(text, "12:34" in text)
+        assertTrue(text, "Sound heard: 50 %" in text)
+        assertTrue(text, "capture blocked): 10 s" in text)
+        assertTrue(text, "5 made, 5 shown, 2 too late" in text)
+        assertTrue(text, "median 3.0 s, slowest 5.0 s" in text)
+        assertTrue(text, "70 % on average, 90 % at most" in text)
+        assertTrue(text, "hottest hot" in text && "phone is hot" in text)
+        assertTrue(text, "Floating subtitles: shown" in text)
+    }
 }

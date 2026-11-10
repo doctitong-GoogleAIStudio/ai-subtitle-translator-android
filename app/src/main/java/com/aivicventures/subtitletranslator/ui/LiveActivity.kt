@@ -48,6 +48,8 @@ class LiveActivity : ComponentActivity() {
     private lateinit var errorText: TextView
     private lateinit var errorActions: LinearLayout
     private lateinit var usageText: TextView
+    private lateinit var reportText: TextView
+    private lateinit var reportCopy: MaterialButton
     private val status = HashMap<Int, TextView>()
     private var pendingMode: AudioMode = AudioMode.MICROPHONE
     private var askedNotifications = false
@@ -144,6 +146,16 @@ class LiveActivity : ComponentActivity() {
         usageText = body(getString(R.string.live_usage_none))
         col.addFull(card(16) { addView(usageText) })
 
+        col.addFull(sectionTitle(getString(R.string.live_report_title)))
+        reportText = caption().apply { typeface = android.graphics.Typeface.MONOSPACE; setTextIsSelectable(true) }
+        reportCopy = tonalButton(getString(R.string.live_report_copy), R.drawable.ic_copy) { copyReport() }
+        col.addFull(card(16) {
+            addFull(body(getString(R.string.live_report_help)))
+            addFull(reportText, 10)
+            addFull(reportCopy, 10)
+        })
+        showReport()
+
         col.addFull(sectionTitle(getString(R.string.about_privacy)))
         col.addFull(card {
             addView(row(iconBadge(R.drawable.ic_shield), stack(body(getString(R.string.live_privacy)))))
@@ -155,6 +167,20 @@ class LiveActivity : ComponentActivity() {
             }
         }
         startTestSessionIfAsked()
+    }
+
+    private fun showReport() {
+        val r = live.lastReport
+        reportText.text = r.ifEmpty { getString(R.string.live_report_none) }
+        reportCopy.isEnabled = r.isNotEmpty()
+    }
+
+    private fun copyReport() {
+        val r = live.lastReport.ifEmpty { return }
+        getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText(getString(R.string.live_report_title), r))
+        // Android 13+ shows its own confirmation when something is copied.
+        if (Build.VERSION.SDK_INT < 33) android.widget.Toast.makeText(this, R.string.live_report_copied, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun modeName(m: AudioMode) = getString(
@@ -179,6 +205,7 @@ class LiveActivity : ComponentActivity() {
 
     private fun render(s: LiveSession.State) {
         val running = s.running
+        if (!running && s.phase != LiveSession.Phase.IDLE) showReport()
         startButton.isEnabled = !running
         stopButton.isEnabled = running
         bigButton.visibility = if (running && s.mode == AudioMode.SECOND_DEVICE) View.VISIBLE else View.GONE
@@ -201,7 +228,8 @@ class LiveActivity : ComponentActivity() {
             LiveSession.Phase.LOADING -> getString(R.string.loading_model, s.model)
             LiveSession.Phase.LISTENING, LiveSession.Phase.PAUSED ->
                 getString(R.string.live_state_asr, s.model, getString(if (s.recognising) R.string.live_state_working else R.string.live_state_waiting)) +
-                    if (s.fallingBehind) getString(R.string.live_state_behind) else ""
+                    (if (s.fallingBehind) getString(R.string.live_state_behind) else "") +
+                    (if (s.provisionalPaused) getString(R.string.live_state_provisional_paused) else "")
             else -> getString(R.string.live_state_off)
         }
         status[R.string.live_status_translation]?.text = if (running && s.translator.isNotEmpty()) {
@@ -232,7 +260,7 @@ class LiveActivity : ComponentActivity() {
     }
 
     private fun errorActionsFor(s: LiveSession.State): List<Pair<String, () -> Unit>> = when (s.error) {
-        getString(R.string.live_error_overlay_denied) -> overlayActions()
+        getString(R.string.live_error_overlay_denied), getString(R.string.live_error_overlay_refused) -> overlayActions()
         getString(R.string.live_error_mic_denied) -> listOf(getString(R.string.live_action_app_settings) to ::openAppSettings)
         else -> listOf(getString(R.string.live_action_retry) to ::startClicked)
     }
@@ -372,12 +400,15 @@ class LiveActivity : ComponentActivity() {
         val file = File(getExternalFilesDir("live-test"), File(name).name)
         if (!file.isFile) return
         val mode = runCatching { AudioMode.valueOf(extras.getStringExtra(EXTRA_TEST_MODE) ?: "") }.getOrDefault(AudioMode.MICROPHONE)
-        LiveSubtitleService.start(this, mode, testFile = file.path)
+        LiveSubtitleService.start(this, mode, testFile = file.path, testThreads = extras.getIntExtra(EXTRA_TEST_THREADS, 0),
+            testAdaptive = extras.getBooleanExtra(EXTRA_TEST_ADAPTIVE, true))
         if (mode == AudioMode.SECOND_DEVICE) startActivity(Intent(this, SecondDeviceActivity::class.java))
     }
 
     companion object {
         const val EXTRA_TEST_AUDIO = "test_audio"
         const val EXTRA_TEST_MODE = "test_mode"
+        const val EXTRA_TEST_THREADS = "test_threads"
+        const val EXTRA_TEST_ADAPTIVE = "test_adaptive"
     }
 }

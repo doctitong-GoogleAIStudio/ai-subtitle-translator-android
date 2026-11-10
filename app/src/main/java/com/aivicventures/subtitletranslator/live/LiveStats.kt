@@ -45,6 +45,8 @@ class LiveStats {
     private var droppedBacklog = 0
     private var latencySum = 0L
     private var latencyCount = 0
+    /** End of speech until shown, for every final line shown (for the session report). */
+    private val lags = ArrayList<Long>()
 
     @Synchronized
     fun start(nowMs: Long) {
@@ -58,6 +60,7 @@ class LiveStats {
         droppedBacklog = 0
         latencySum = 0
         latencyCount = 0
+        lags.clear()
     }
 
     @Synchronized fun recognised(audioSec: Double) { recognisedSec += audioSec }
@@ -83,6 +86,18 @@ class LiveStats {
         while (done.size > WINDOW) done.removeFirst()
         latencySum += totalMs
         latencyCount++
+        if (lags.size < MAX_LAGS) lags.add(totalMs)
+    }
+
+    /** Final lines shown so far. */
+    val shownCount: Int @Synchronized get() = latencyCount
+
+    /** Median and largest delay from end of speech to subtitle, or null before the first line. */
+    @Synchronized
+    fun lagSpread(): Pair<Long, Long>? {
+        if (lags.isEmpty()) return null
+        val sorted = lags.sorted()
+        return sorted[sorted.size / 2] to sorted.last()
     }
 
     @Synchronized
@@ -106,5 +121,6 @@ class LiveStats {
 
     companion object {
         const val WINDOW = 20
+        private const val MAX_LAGS = 20_000
     }
 }

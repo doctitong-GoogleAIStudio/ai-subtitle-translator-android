@@ -153,6 +153,17 @@
     <string name="live_state_working">recognising</string>
     <string name="live_state_waiting">waiting for speech</string>
     <string name="live_state_behind">. Falling behind: some lines were skipped. Try Fast quality or a smaller speech model.</string>
+    <string name="live_state_provisional_paused">. Lines in progress are paused so finished lines keep up.</string>
+    <string name="live_no_sound_internal">Listening, but no sound yet. Start the video. If it is playing, its app may not allow capture.</string>
+    <string name="live_no_sound_mic">Listening, but the microphone hears nothing. Turn the sound up or move closer.</string>
+    <string name="live_behind_short">The phone is busy: some lines were skipped.</string>
+    <string name="live_report_title">Last session report</string>
+    <string name="live_report_help">If the subtitles did not work as expected, copy this report and send it with a few words about what you saw. It has only timings and counts: no subtitle text, audio or app names.</string>
+    <string name="live_report_none">No session yet.</string>
+    <string name="live_report_copy">Copy report</string>
+    <string name="live_report_copied">Report copied</string>
+    <string name="live_report_stopped">stopped by the user</string>
+    <string name="live_report_error">error: %1$s</string>
     <string name="live_state_mt_m2m100">M2M100 on this phone</string>
     <string name="live_state_mt_whisper">Whisper\'s own translation, on this phone</string>
     <string name="live_state_overlay_on">Showing over other apps</string>
@@ -174,6 +185,7 @@
     <string name="live_overlay_message">To show subtitles over YouTube and other apps, Android needs the \"Display over other apps\" permission. On the next screen, turn it on for AI Subtitle Translator, then come back.</string>
     <string name="live_overlay_open">Open the setting</string>
 
+    <string name="live_error_overlay_refused">This phone did not allow the floating window, although \"Display over other apps\" is on. Some phones have a second switch for pop-up windows in the app\'s settings. External device mode shows the subtitles in this app instead.</string>
     <string name="live_error_overlay_denied">Floating subtitles need \"Display over other apps\". Without it, use External device mode, which shows the subtitles in this app.</string>
     <string name="live_error_mic_denied">Live subtitles need permission to record audio, also for internal audio. You can allow it in the app\'s settings under Permissions.</string>
     <string name="live_error_internal_old">Internal audio needs Android 10 or later. Use the microphone instead.</string>
