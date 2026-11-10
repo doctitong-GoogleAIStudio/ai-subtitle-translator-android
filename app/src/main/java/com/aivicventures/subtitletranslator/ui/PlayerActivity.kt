@@ -45,6 +45,7 @@ import com.aivicventures.subtitletranslator.audio.AudioWindowReader
 import com.aivicventures.subtitletranslator.audio.FfmpegAudio
 import com.aivicventures.subtitletranslator.device.CpuTopology
 import com.aivicventures.subtitletranslator.device.PowerMonitor
+import com.aivicventures.subtitletranslator.device.TestHooks
 import com.aivicventures.subtitletranslator.audio.Fingerprint
 import com.aivicventures.subtitletranslator.audio.UnsupportedAudioException
 import com.aivicventures.subtitletranslator.buffering.BufferState
@@ -100,6 +101,8 @@ class PlayerActivity : ComponentActivity() {
     private var audioApplied = false
     private val settings by lazy { app.settings }
     private lateinit var mode: Mode
+    /** Test overrides; empty unless [TestHooks] are on (this screen is exported). */
+    private val testExtras by lazy { TestHooks.extras(intent) }
 
     private val exportSrt = registerForActivityResult(ActivityResultContracts.CreateDocument("application/x-subrip")) { uri ->
         if (uri != null) writeSrt(uri)
@@ -284,8 +287,8 @@ class PlayerActivity : ComponentActivity() {
 
     private suspend fun openEngine(uri: Uri) {
         val models = app.models
-        val spec = models.chooseAsr(intent.getStringExtra(EXTRA_MODEL) ?: settings.asrModel)
-        val threads = intent.getIntExtra(EXTRA_THREADS, 0).takeIf { it in 1..8 } ?: settings.threads
+        val spec = models.chooseAsr(testExtras.getStringExtra(EXTRA_MODEL) ?: settings.asrModel)
+        val threads = testExtras.getIntExtra(EXTRA_THREADS, 0).takeIf { it in 1..8 } ?: settings.threads
         val vad = models.vadModel()
         if (spec == null || vad == null) {
             showError(getString(R.string.models_missing))
@@ -297,7 +300,7 @@ class PlayerActivity : ComponentActivity() {
             val (eng, r, a) = withContext(Dispatchers.IO) {
                 val fp = Fingerprint.of(this@PlayerActivity, uri)
                 fingerprint = fp
-                if (intent.getBooleanExtra(EXTRA_CLEAR_CACHE, false)) app.db.clearMovie(fp)
+                if (testExtras.getBooleanExtra(EXTRA_CLEAR_CACHE, false)) app.db.clearMovie(fp)
                 val tracks = AudioWindowReader.tracks(this@PlayerActivity, uri)
                 val ordinal = intent.getIntExtra(EXTRA_AUDIO_TRACK, -1).takeIf { it in tracks.indices }
                     ?: AudioTrackInfo.chooseDefault(tracks, settings.audioTrack(fp), language)
@@ -308,14 +311,14 @@ class PlayerActivity : ComponentActivity() {
                 app.db.upsertMovie(fp, uri.toString(), movieName, duration)
                 val a = models.weights(spec).use { WhisperAsr(this@PlayerActivity, it, models.localFile(vad.files.first()).path, spec.id) }
                 val mtSpec = models.translationModel()
-                val useMt = when (intent.getStringExtra(EXTRA_TRANSLATOR) ?: settings.translator) {
+                val useMt = when (testExtras.getStringExtra(EXTRA_TRANSLATOR) ?: settings.translator) {
                     "whisper" -> false
                     "m2m100" -> true
                     else -> spec.autoMt
                 }
                 // Fast cores only: the engine thread is pinned (whisper.cpp's workers inherit it);
                 // CTranslate2 starts its workers while the translator is built, so pin that too.
-                val pins = intent.getStringExtra(EXTRA_PIN_CPUS)?.let { CpuTopology.parseCpuList(it) }
+                val pins = testExtras.getStringExtra(EXTRA_PIN_CPUS)?.let { CpuTopology.parseCpuList(it) }
                     ?: CpuTopology.fastCores.takeIf { settings.fastCoresOnly && CpuTopology.heterogeneous }
                 val mt = if (useMt && mtSpec != null && TranslatorNative.available) {
                     runCatching { CpuTopology.withPinned(pins) { models.weights(mtSpec).use { M2M100Translator(models.localFolder(mtSpec), it, threads) } } }
@@ -328,13 +331,13 @@ class PlayerActivity : ComponentActivity() {
                 // the Phase 1 key so existing caches stay valid.
                 val task = (if (mt != null) mtSpec!!.id else "translate") + if (ordinal > 0) "@a$ordinal" else ""
                 val profile = app.db.profileId(fp, spec.id, task, language)
-                val pre = if (!intent.getBooleanExtra(EXTRA_PREFETCH, true)) null
+                val pre = if (!testExtras.getBooleanExtra(EXTRA_PREFETCH, true)) null
                 else runCatching { AudioWindowReader(this@PlayerActivity, uri, r.track) }.getOrNull()
                 prefetchReader = pre
-                val power = PowerMonitor(this@PlayerActivity, intent.getBooleanExtra(EXTRA_BATTERY_SAVER, settings.batterySaver))
+                val power = PowerMonitor(this@PlayerActivity, testExtras.getBooleanExtra(EXTRA_BATTERY_SAVER, settings.batterySaver))
                 val eng = LookAheadEngine(r, pre, a, mt, app.db, profile, duration, mode, language, threads, settings.continueWholeMovie,
-                    intent.getIntExtra(EXTRA_MT_BEAM, 0), power, pins, intent.getBooleanExtra(EXTRA_SHORT_AUDIO, false),
-                    intent.getFloatExtra(EXTRA_GROUP_GAP, WhisperAsr.GROUP_GAP.toFloat()).toDouble())
+                    testExtras.getIntExtra(EXTRA_MT_BEAM, 0), power, pins, testExtras.getBooleanExtra(EXTRA_SHORT_AUDIO, false),
+                    testExtras.getFloatExtra(EXTRA_GROUP_GAP, WhisperAsr.GROUP_GAP.toFloat()).toDouble())
                 Log.i(TAG, "open $movieName fp=${fp.take(12)} duration=%.1f mode=$mode model=${spec.id} mt=$task lang=$language threads=$threads prefetch=${pre != null} audio=${r.mime} decoder=${r.decoderName} track=${ordinal + 1}/${tracks.size} pin=${pins ?: "-"} cached=${eng.subtitles().size}".format(duration))
                 Triple(eng, r, a)
             }
@@ -533,8 +536,8 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "SubPlayer"
-        /** Optional overrides for automated tests: a Mode name, a model id, ignoring the
-         *  resume position, and discarding this movie's cached subtitles. */
+        /** Mode name, ignoring the resume position and the audio track are open to any caller.
+         *  Every other extra below is a test override, read only when [TestHooks] are on. */
         const val EXTRA_MODE = "mode"
         const val EXTRA_FROM_START = "from_start"
         const val EXTRA_MODEL = "model"
