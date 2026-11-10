@@ -15,3 +15,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "subtitle-translator-android"
 include(":app")
+// Google Play build only (`./gradlew bundleRelease -Pplay`): the models go into an
+// install-time asset pack, because Play's base module is limited to 200 MB.
+if (providers.gradleProperty("play").isPresent) include(":models")

@@ -574,9 +574,34 @@ decides.
 
 ## Google Play
 
-The universal APK is about 816 MB, and the AAB about 791 MB. Play allows 200 MB for the
-base module, so the models must move into Play Asset Delivery **install-time asset packs**
-(at most 1.5 GB each, 4 GB in all) before an upload. This has not been done yet. It changes
-how the build packs and reads the models, and it can only be tested with bundletool or
-Play's internal testing. The foreground-service declarations, overlay use and Data safety
-answers are drafted in [docs/permissions-and-privacy.md](docs/permissions-and-privacy.md).
+The universal APK is about 816 MB. Play allows 200 MB for the base module, so the Play
+build puts the models in an **install-time asset pack** (Play Asset Delivery):
+
+```bash
+./gradlew :app:bundleRelease -Pplay
+```
+
+- **What `-Pplay` does:** it adds the `:models` module, an install-time pack named
+  `models`.
+  - At build time, `bundled-models/assets/models` is copied into `models/src/main/assets`
+    (gitignored).
+  - The base module then leaves the models out.
+  - Without `-Pplay`, every build (the universal APK too) is exactly as before.
+- **Result:** `app/build/outputs/bundle/release/app-release.aab`, kept in this folder as
+  `AI-Subtitle-Translator-play v1.2.0.aab`. The base module is 39 MB and the `models` pack
+  732 MB, so it is under Play's limits (200 MB base; 1.5 GB per pack, 4 GB in all).
+- **Reading the models:** Play installs the pack with the app, as a split APK. Its assets
+  keep the same paths (`assets/models/...`), stored uncompressed, so the app reads them in
+  place exactly as from the universal APK. Nothing in the app's code changed.
+- **Checked on the emulator:**
+  - bundletool 1.18.3 (the version AGP 9.4.1 uses) built the APK set from the AAB and
+    extracted the emulator's splits: base, English, x86_64, xxhdpi and `models`.
+  - `adb install-multiple` installed them.
+  - The FLEURS test movie in Full Movie mode loaded Whisper, the voice detector and M2M100
+    from the pack. It scored chrF 43.2 with 0 of 16 missing, the same as the universal APK.
+- **Not checked:** an upload to Play (internal testing), or Play's own split selection on a
+  real phone. A phone downloads about 805 MB from Play: the base, its ABI and screen
+  splits, and the pack.
+
+The foreground-service declarations, overlay use and Data safety answers are drafted in
+[docs/permissions-and-privacy.md](docs/permissions-and-privacy.md).

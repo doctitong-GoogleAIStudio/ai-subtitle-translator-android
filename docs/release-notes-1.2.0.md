@@ -125,5 +125,7 @@ anywhere itself: no analytics, accounts or uploads.
   Use their captions, or the microphone.
 - **Live subtitles are less accurate than the movie player**, which has the whole film to
   work with: FLEURS chrF 34.8 live, 43.6 in the player's Full Movie mode.
-- **Google Play:** the APK (816 MB) is too big for Play. The models must first move into
-  Play Asset Delivery packs, which has not been done.
+- **Google Play:** the APK (816 MB) is too big for Play, so there is a separate Play bundle
+  with the models in an install-time asset pack (`AI-Subtitle-Translator-play v1.2.0.aab`;
+  39 MB base, 732 MB pack). It installed and played the FLEURS test movie on the emulator
+  through bundletool (chrF 43.2). It has not been uploaded to Play.

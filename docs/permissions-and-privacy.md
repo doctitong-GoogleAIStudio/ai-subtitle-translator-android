@@ -78,9 +78,10 @@ microphone and no screen capture, and it stops when the browser screen closes.
   - No data collected or shared by the developer.
   - Data is processed on the device only.
   - The browser connects to the sites the user opens.
-- **Size.** The APK is about 816 MB with every model inside. Play's base-module limit is 200
-  MB (AAB). Before uploading, the models must move into Play Asset Delivery install-time
-  asset packs (each at most 1.5 GB, 4 GB in total). This has not been done yet. See the
-  README, section *Google Play*.
+- **Size.** The APK is about 816 MB with every model inside, over Play's 200 MB base-module
+  limit. The Play build (`./gradlew :app:bundleRelease -Pplay`) moves the models into an
+  install-time asset pack: 39 MB base, 732 MB pack. It installed and ran on the emulator
+  through bundletool, but has not been uploaded to Play. See the README, section *Google
+  Play*.
 - The app does not use AccessibilityService.
 - Approval is decided by Google; nothing here guarantees it.

@@ -23,6 +23,8 @@ app/src/main/ffmpeg/include/
 /bench/
 # Models bundled into the APK (fetched by the fetchModels Gradle task, about 780 MB).
 /bundled-models/
+# The same models copied into the Google Play asset pack at build time (-Pplay).
+/models/src/main/assets/
 # Release signing key and its passwords: never committed, back them up yourself.
 /keystore.properties
 /signing/

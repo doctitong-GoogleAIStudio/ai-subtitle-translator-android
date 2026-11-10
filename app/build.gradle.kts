@@ -8,6 +8,9 @@ plugins {
 }
 
 val bundledModels = rootProject.layout.projectDirectory.dir("bundled-models")
+// `-Pplay`: build the Google Play bundle, with the models in the :models install-time asset
+// pack instead of the base module. Without it (the universal APK) the models are in the base.
+val playBundle = providers.gradleProperty("play").isPresent
 val ffmpegSourceDir = layout.buildDirectory.dir("generated/ffmpegSource").get().asFile
 
 android {
@@ -71,8 +74,11 @@ android {
     sourceSets.getByName("main").jniLibs.srcDir("src/main/ffmpeg/jniLibs")
     // ...and their LGPL source (assets/source, from ffmpegSource below).
     sourceSets.getByName("main").assets.srcDir(ffmpegSourceDir)
-    // Every model of the catalog ships in the APK (assets/models, from fetchModels below).
-    sourceSets.getByName("main").assets.srcDir(bundledModels.dir("assets"))
+    // Every model of the catalog ships in the APK (assets/models, from fetchModels below), or
+    // for Google Play in the install-time asset pack :models (same asset paths, so the app
+    // reads them the same way).
+    if (playBundle) assetPacks += ":models"
+    else sourceSets.getByName("main").assets.srcDir(bundledModels.dir("assets"))
     // Stored uncompressed so whisper.cpp and CTranslate2 read the weights in place from the APK
     // (and the already compressed FFmpeg source zip is not compressed a second time).
     androidResources { noCompress += listOf("bin", "zip") }
