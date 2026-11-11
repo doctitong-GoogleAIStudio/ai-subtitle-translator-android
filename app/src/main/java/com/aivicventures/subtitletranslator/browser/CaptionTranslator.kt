@@ -28,7 +28,7 @@ class CaptionTranslator(
     private val beam: Int,
     /** Called on the worker thread whenever more English is ready or the state changes. */
     private val onChange: () -> Unit,
-) : AutoCloseable {
+) : AheadSubtitles {
     enum class State {
         /** Loading the translation model. */
         LOADING,
@@ -52,7 +52,7 @@ class CaptionTranslator(
     @Volatile var state = State.LOADING
         private set
     /** Video position the translation works forward from. */
-    @Volatile var position = 0.0
+    @Volatile override var position = 0.0
         set(v) {
             field = v
             synchronized(lock) { lock.notifyAll() }
@@ -91,14 +91,18 @@ class CaptionTranslator(
     fun isTranslated(c: Cue) = english.containsKey(c)
 
     /** English for video time [t]: the lines showing then, and whether one is still untranslated. */
-    fun textAt(t: Double): Pair<String, Boolean> {
+    override fun textAt(t: Double): Pair<String, Boolean> {
         val active = Captions.activeAt(snapshot(), t)
         var missing = false
         val text = active.mapNotNull { c -> english[c] ?: run { missing = true; null } }.joinToString("\n")
         return text to missing
     }
 
-    fun readyAhead(now: Double, horizon: Double): Double = Captions.readyAhead(snapshot(), ::isTranslated, now, horizon)
+    override fun readyAhead(now: Double, horizon: Double): Double = Captions.readyAhead(snapshot(), ::isTranslated, now, horizon)
+
+    /** Translating (or ready for more cues) and there are cues: Smart Delay applies. */
+    override val holdable: Boolean
+        get() = (state == State.TRANSLATING || state == State.LOADING || state == State.READY) && cueCount() > 0
 
     /** Up to [BATCH] sentences (each one or more cues) from the current position on. */
     private fun nextBatch(): List<List<Cue>> {

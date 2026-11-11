@@ -1,4 +1,4 @@
-# Permissions, data handling and Play notes (version 1.2.0)
+# Permissions, data handling and Play notes (version 1.3.0)
 
 The movie player needs no permissions. The built-in browser needs the internet. Each
 Live Floating Subtitles permission is asked for only when the user taps
@@ -17,14 +17,26 @@ Live Floating Subtitles permission is asked for only when the user taps
 
 Not requested: storage, accessibility service, camera, location, contacts or accounts.
 
-The browser's default source, the video's own sound, needs no permission at all. It reads
-the page's video through Web Audio inside the app. There is no foreground service, no
-microphone and no screen capture, and it stops when the browser screen closes.
+The browser's default source, the video's own sound, needs no permission at all. It is read
+inside the page: either the sound the site's player has already loaded ahead (Media Source
+Extensions, for Smart Delay), or the playing sound through Web Audio. There is no foreground
+service, no microphone and no screen capture, and it stops when the browser screen closes.
 
 ## Data handling (for a store listing or a privacy policy)
 
 - **Audio.** Audio is processed in memory on the device, in pieces of up to 12 seconds, and
   dropped after recognition. No raw audio, video or movie content is stored.
+- **Browser sound loaded ahead (Smart Delay, 1.3.0).** Many sites' players load the sound
+  some seconds ahead of the picture. While subtitles are on, the page script passes the
+  sound-only part of what the player has already loaded to the app, which decodes and
+  recognises it in memory. Nothing extra is downloaded, pictures are never copied, and
+  protected (DRM) sound is never passed on or decoded. The page keeps at most about 12 MB
+  of sound per player, and the app about four minutes, both only around the playhead
+  (earlier sound is dropped). All of it is gone when subtitles stop or the page closes.
+  Nothing is written to storage.
+- **Video site directory (1.3.0).** The browser's start page is bundled with the app and
+  shown without any network request. It lists sites only; nothing is loaded from a site
+  until the user taps it.
 - **Live dialogue.** Recognised dialogue stays in memory while a session runs: the
   subtitles on screen and the last 2 to 4 lines as context. It is deleted when the session
   stops and never written to disk.

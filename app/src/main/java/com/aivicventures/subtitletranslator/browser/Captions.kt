@@ -114,7 +114,7 @@ object Captions {
     }
 
     /** Smart Delay targets offered in the browser, in seconds (0 = off). */
-    val SMART_DELAY_CHOICES = listOf(0, 5, 10, 15, 20, 30)
+    val SMART_DELAY_CHOICES = listOf(0, 5, 10, 15, 20, 30, 45, 60)
 
     private val SENTENCE_END = ".!?…。！？♪"
     private val CLOSERS = "\"'”’»)]」』"

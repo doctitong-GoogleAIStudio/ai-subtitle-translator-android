@@ -7,24 +7,29 @@ measured better for the chosen speech model), a look-ahead buffer that stays ahe
 playhead, a cache so a movie is never processed twice, SRT export, an audio track picker
 and optional LGPL FFmpeg decoders for AC-3, E-AC-3 and DTS soundtracks.
 
-Version 1.2.0 adds two more ways to get English subtitles, also worked out on the phone:
+Version 1.2.0 added two more ways to get English subtitles, also worked out on the phone:
 - **A built-in movie browser.** It translates a web video's own captions, or recognises
   the video's sound, and shows the English over the video. Smart Delay can hold the video
   until enough is translated.
 - **Live Floating Subtitles.** Subtitles float over other apps such as YouTube, from
   internal audio or the microphone.
 
+Version 1.3.0 makes Smart Delay work from the video's sound on any site that streams
+through Media Source Extensions (Bilibili.tv, Dailymotion and most others): the video waits
+up to 60 s while the sound the site has already loaded ahead is put into English, then plays
+with each line on time. New browser tabs open a directory of foreign video sites.
+
 No movie audio, subtitles or keys leave the device. Every model is built into the app, so
 nothing is downloaded. The internet permission is used only by the browser to load the pages
 the user opens.
 
-Status: **version 1.2.0**, release build (see [Phases](#phases)), tested on the emulator
+Status: **version 1.3.0**, release build (see [Phases](#phases)), tested on the emulator
 only. Package `com.aivicventures.subtitletranslator`.
 
 ## The APK
 
-`AI-Subtitle-Translator-universal v1.2.0.apk` in this folder is the universal release build,
-version 1.2.0 ([release notes](docs/release-notes-1.2.0.md)):
+`AI-Subtitle-Translator-universal v1.3.0.apk` in this folder is the universal release build,
+version 1.3.0 ([release notes](docs/release-notes-1.3.0.md)):
 - **Size:** about 816 MB, because every model is inside: Whisper tiny, base and small,
   Silero VAD, and the M2M100 translator (778 MB together). FFmpeg's source code is inside
   too (11 MB), so the APK can be shared on its own. The app itself is 26 MB.
@@ -34,7 +39,7 @@ version 1.2.0 ([release notes](docs/release-notes-1.2.0.md)):
   because they are read straight from the APK.
 - **Signing:** signed with this project's own release key (see
   [Release signing](#release-signing)), not the debug key.
-- **Upgrading from 1.0 or 1.1:** install over it (same key); recent movies and saved subtitles are kept.
+- **Upgrading from 1.0, 1.1 or 1.2:** install over it (same key); recent movies and saved subtitles are kept.
 - **Permissions:** the movie player needs none. The browser uses `INTERNET`. Floating
   subtitles ask for display over other apps, record audio and (for internal audio) screen
   capture, each only when a live session starts. See
@@ -43,7 +48,7 @@ version 1.2.0 ([release notes](docs/release-notes-1.2.0.md)):
   install 1.0 over them. Uninstall the old app first. This also clears its recent list and
   saved subtitles, and the models it had downloaded.
 
-Install it with `adb install -r "AI-Subtitle-Translator-universal v1.2.0.apk"`, or by copying the
+Install it with `adb install -r "AI-Subtitle-Translator-universal v1.3.0.apk"`, or by copying the
 file to the phone and opening it.
 
 Use: tap **Open a video**, pick a file, and playback starts by itself once enough subtitles
@@ -120,6 +125,15 @@ are ready. There is nothing to download or set up first.
 (DuckDuckGo), bookmarks, history (cleared from the menu, with cookies and cache) and
 full-screen video. Play a video, then tap **Start AI subtitles**.
 
+- **Foreign video sites** (1.3.0): new tabs open a directory of 38 official video sites in
+  other languages (`app/src/main/assets/browser/sites.html`), grouped by region, with a
+  filter. It is also in the menu.
+  - Bilibili.tv and Dailymotion are marked as tested with Smart Delay. The other sites are
+    listed but not tried.
+  - Sites that are often limited to their own country, or need a sign-in, are marked.
+  - The page is bundled with the app and served only at its own address
+    (`shouldInterceptRequest`); no other app file is reachable through it.
+
 - **Sound source** (menu, also the button next to Start):
   - **Automatic** (default): the video's captions when it has a readable track, else the
     video's sound, else the microphone after asking.
@@ -132,10 +146,23 @@ full-screen video. Play a video, then tap **Start AI subtitles**.
     permission, no microphone and no screen capture. One tap on the video is needed before
     the page will play sound to the app.
   - **Internal audio** and **Microphone:** asked for each time, as in the Live screen.
-- **Smart Delay** (menu, captions only): 0, 5, 10, 15, 20 or 30 s.
-  - The video waits until that much has been translated ahead.
-  - It waits again whenever translation falls behind.
-  - A tap on Play overrides it.
+- **Smart Delay** (the **Delay** button, 1.3.0): off, 5, 10, 15, 20, 30, 45 or 60 s, on
+  every site. The video waits until that many seconds ahead are in English, then plays with
+  the subtitles on time.
+  - **With captions:** they are translated ahead, as in 1.2.0.
+  - **With the video's sound (new in 1.3.0):** most sites play through Media Source
+    Extensions, and their players load the sound some seconds ahead of the picture. The
+    page script passes the sound-only part of what is already loaded to the app
+    (`browser/SoundAhead.kt`), which decodes it, recognises and translates it from the
+    playhead forward, and shows each line at its own video time. Players that keep sound
+    and picture in one MP4 buffer (Dailymotion) are read too: the page script keeps only
+    the sound track's samples.
+  - **How far ahead depends on the site.** A player that loads only 30 s ahead allows at
+    most 30 s; the status then says "the site loads only 30 s ahead" and the video plays
+    on rather than waiting forever.
+  - Where the sound can only be heard as it plays (a plain video file), live subtitles
+    are used and the status says Smart Delay cannot wait. DRM sound is never read.
+  - It waits again whenever the work falls behind. A tap on Play overrides it.
 - **Seeking** clears the old lines and listening restarts at the new position. Nothing is
   recognised while the video is paused.
 - **What it refuses:**
@@ -256,7 +283,7 @@ it and is force-included.
 | Cache | `cache/CacheDb.kt` | Tables: movies, profiles, segments, coverage. |
 | Subtitles | `subtitles/Layout.kt`, `Subtitles.kt` | Port of the Windows layout rules: 2 × 42 characters, ≤ 20 characters per second, ≤ 7 s per cue. SRT writer. |
 | Models | `models/ModelManager.kt`, `assets/model_catalog.json` | All bundled in the APK (fetched and SHA-256 checked at build time). Weights read in place from the APK; default speech model chosen by device RAM. |
-| Browser | `ui/BrowserActivity.kt`, `browser/`, `assets/browser/page.js` | WebView with `androidx.webkit` document-start script and message listener in every frame. The page script reports the video's state and caption cues, and taps the sound with Web Audio (16 kHz PCM to `live/PageAudio.kt`). `CaptionTranslator` translates cues ahead of the playhead, one sentence at a time. Smart Delay holds the video through the script. Bookmarks and history in `browser.db`. |
+| Browser | `ui/BrowserActivity.kt`, `browser/`, `assets/browser/page.js` | WebView with `androidx.webkit` document-start script and message listener in every frame. The page script reports the video's state and caption cues, and taps the sound with Web Audio (16 kHz PCM to `live/PageAudio.kt`). `CaptionTranslator` translates cues ahead of the playhead, one sentence at a time. The script also notes the sound-only pieces a Media Source Extensions player appends; with subtitles on, `SoundAhead` decodes them (`Mp4Boxes` gives the time, MediaExtractor/MediaCodec decode, `SoundStore` keeps them by video time) and runs Whisper and M2M100 ahead of the playhead. Smart Delay holds the video through the script. Bookmarks and history in `browser.db`. |
 | Live subtitles | `live/` | `LiveSubtitleService` (foreground service for internal audio or microphone, plain service for the browser), `LiveEngine` (segmenter → Whisper → M2M100 → timeline, busy-aware provisional lines), `SubtitleOverlay`, `LiveReport` (timing-only session report), `ContextMemory` (recent lines as Whisper prompt, name spellings). |
 | UI | `ui/` | Material 3 (Material Components 1.14), light and dark, brand colours. Main (recent movies with remove/delete, browser, live), Player (Media3 ExoPlayer + subtitle overlay, landscape full screen, fit/fill), Browser, Live and Live settings, External device screen, Built-in models, Settings, About & licences. |
 
@@ -469,6 +496,19 @@ The emulator can show that these switches take effect. It cannot show whether th
 What works on which source, site and Android version, and what has not been tried, is in
 [docs/compatibility-matrix.md](docs/compatibility-matrix.md).
 
+### 1.3.0: Smart Delay with the video's sound, video site directory (emulator)
+
+| Test | Result |
+|---|---|
+| Unit tests | 55 pass, including MP4 piece timing, encrypted-sound detection, sound placement by video time and the Smart Delay choices |
+| Local streaming page, separate sound buffer, Smart Delay 15 s (FLEURS) | Waited 13.6 s after Play (models included), then played through. 16 of 16 utterances subtitled; first line a median 0.09 s after the speech (1.2.0 live: 2.8 s). chrF 41.0. 2.68× real time, 25 s ahead |
+| Same, sound and picture in one buffer (like Dailymotion) | Waited 11.2 s; 16 of 16, median 0.04 s; chrF 37.9 (run-to-run: Korean split differently) |
+| 60 s delay, page loading 30 s; then a seek | Played on after 15.2 s saying the site loads only so far; after the seek, waited again and resumed |
+| Plain video file; captions with 15 s | Live subtitles with an explanation; captions needed no wait |
+| Dailymotion (Tagalog news video) | Read from the one-buffer player; waited 14.1 s, then 21–29 s ahead |
+| Bilibili.tv (Japanese anime episode) | Read; waited 12.7 s, then 22–26 s ahead. Two other titles needed a login |
+| Video site directory | Start page, filter, links and menu entry work; other app files are not served at its address |
+
 ### Not tested yet
 
 - A real ARM phone: speed, battery, heat, and memory with small on a 4 GB phone. M2M100
@@ -485,8 +525,9 @@ What works on which source, site and Android version, and what has not been trie
   run.
 - A real film with a dub and an original track. The multi-track test used a remuxed FLEURS
   movie.
-- 1.2.0 on a real phone:
-  - the browser on public video sites;
+- 1.2.0 and 1.3.0 on a real phone:
+  - the browser on public video sites, and Smart Delay with their sound (speed, heat);
+  - the 36 directory sites not yet tried;
   - floating subtitles over YouTube and other apps;
   - phone skins and Android 8 to 15.
 
@@ -543,12 +584,16 @@ decides.
    - Landscape full screen with fit/fill, remove and delete in Recent movies, and a
      Material 3 look with a new launcher icon (themed icon on Android 13+).
    - Release key instead of the debug key.
-5. **Version 1.2.0 (this build)**:
+5. **Version 1.2.0**:
    - Built-in movie browser: captions translated ahead, the video's own sound, Smart Delay.
    - Live Floating Subtitles back from 1.1.0, with a session report, busy-aware
      provisional lines and notices for silence, skipped lines and refused overlays.
    - Context in caption translation: split sentences joined, names kept consistent.
-6. **Next: real-phone measurements**:
+6. **Version 1.3.0 (this build)**:
+   - Smart Delay from the video's sound, up to 60 s, on sites using Media Source
+     Extensions, read from what the site has already loaded (one-buffer MP4 included).
+   - Foreign video sites directory as the browser's start page.
+7. **Next: real-phone measurements**:
    - Follow [docs/real-device-test-plan.md](docs/real-device-test-plan.md) on one or more
      phones, then adjust the defaults from the results.
 
@@ -588,7 +633,7 @@ build puts the models in an **install-time asset pack** (Play Asset Delivery):
   - The base module then leaves the models out.
   - Without `-Pplay`, every build (the universal APK too) is exactly as before.
 - **Result:** `app/build/outputs/bundle/release/app-release.aab`, kept in this folder as
-  `AI-Subtitle-Translator-play v1.2.0.aab`. The base module is 39 MB and the `models` pack
+  `AI-Subtitle-Translator-play v1.3.0.aab`. The base module is 39 MB and the `models` pack
   732 MB, so it is under Play's limits (200 MB base; 1.5 GB per pack, 4 GB in all).
 - **Reading the models:** Play installs the pack with the app, as a split APK. Its assets
   keep the same paths (`assets/models/...`), stored uncompressed, so the app reads them in

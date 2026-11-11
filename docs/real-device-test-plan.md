@@ -34,7 +34,7 @@ One phone is enough to start. Each extra phone class makes the defaults safer.
 - **Install the APK:**
 
   ```bash
-  adb install -r "AI-Subtitle-Translator-universal v1.2.0.apk"
+  adb install -r "AI-Subtitle-Translator-universal v1.3.0.apk"
   ```
 
 - **In the app:**
@@ -163,7 +163,7 @@ can be applied without arguing over noise.
 - Copy the `results.md` table into the README's results section, with the phone and SoC
   name, then apply the decisions above as one change with its unit tests.
 
-## Built-in browser and floating subtitles (1.2.0)
+## Built-in browser and floating subtitles (1.2.0, 1.3.0)
 
 No PC or script needed: these are checks by hand on the phone. Send the notes and the
 copied session reports. Use a video you are allowed to watch. Never use the app to get
@@ -171,8 +171,9 @@ around DRM or a site's rules.
 
 ### Browser
 
-1. Main screen, **Open the browser**. Open a page with an ordinary video. Public-domain
-   films on archive.org are a good start.
+1. Main screen, **Open the browser**. It opens the **Foreign video sites** directory. Check
+   that the filter and the region buttons work, and note any site whose link fails. Then
+   open a page with an ordinary video. Public-domain films on archive.org are a good start.
 2. Play the video, tap **Start AI subtitles**, and note:
    - which source the button shows (Captions, Video sound, …);
    - whether English appears, and roughly how late;
@@ -181,8 +182,18 @@ around DRM or a site's rules.
    subtitles follow.
 4. On a video with captions in another language, set **Smart Delay** to 10 s and note
    whether the video waits, then plays on.
-5. Try one big streaming site. It is expected to refuse the video's sound (cross-site or
-   DRM). Note what the app says.
+5. **Smart Delay with the video's sound (1.3.0).** On Dailymotion, Bilibili.tv or another
+   site, tap the **Delay** button and choose 15 s, then 60 s. Start AI subtitles and play.
+   Note:
+   - whether the status says "Smart Delay: preparing subtitles, N of 15 s ready", how long
+     the video waits, and whether it then plays with subtitles on time (with the words, not
+     after them);
+   - whether the video stops again later (the phone fell behind) and how often;
+   - with 60 s, whether it says "the site loads only N s ahead", and what N is;
+   - whether the phone gets warm, and whether "Live subtitles are used" appeared instead
+     (that site's sound could not be read ahead).
+6. Try one big streaming site with DRM. It is expected to refuse the video's sound. Note
+   what the app says.
 
 ### Floating subtitles
 

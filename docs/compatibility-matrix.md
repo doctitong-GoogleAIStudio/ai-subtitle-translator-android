@@ -1,8 +1,8 @@
-# Compatibility matrix (version 1.2.0)
+# Compatibility matrix (version 1.3.0)
 
 What has been checked, where, and what has not. **Every "works" below is from the Android
 emulator on this PC**: Android 16 (API 36), x86_64, 6 vCPU with AVX2, 4 GB RAM, WebView 134.
-No real phone has run 1.2.0. "Not tested" means exactly that; it is not a guess that it fails.
+No real phone has run 1.2.0 or 1.3.0. "Not tested" means exactly that; it is not a guess that it fails.
 
 ## Sound sources
 
@@ -17,11 +17,21 @@ No real phone has run 1.2.0. "Not tested" means exactly that; it is not a guess 
 
 ## Video sites in the browser
 
-Not tested on any public site. Whether a site works depends on how it serves video:
+Two public sites were tried on the emulator with 1.3.0 (counts only, accuracy unmeasured):
+
+| Site | Player | Smart Delay with the video's sound |
+|---|---|---|
+| Dailymotion (a Tagalog news video) | Sound and picture in one MP4 buffer | Works: read ahead, waited 14.1 s, then 21–29 s ahead; the site loads about 30 s |
+| Bilibili.tv (a free Japanese anime episode) | Separate sound buffer, AAC 48 kHz | Works: waited 12.7 s, then 22–26 s ahead; the site loads about 28 s. Two other titles needed a login |
+
+The other 36 sites in the browser's directory have not been tried. Otherwise, whether a
+site works depends on how it serves video:
 
 | How the site serves video | Captions | The video's sound | Internal audio / microphone |
 |---|---|---|---|
-| Same-site video file or stream (HTML5 `<video>`) | Works, if it has text tracks | Works (local test page) | Expected to work |
+| Media Source Extensions stream, sound in its own buffer or one MP4 buffer with the picture | Works, if it has text tracks | Works, and Smart Delay can wait up to what the site loads ahead (local test pages, Dailymotion, Bilibili.tv) | Expected to work |
+| Media Source Extensions, sound and picture in one WebM buffer | Works, if it has text tracks | Live only (heard as it plays); Smart Delay cannot wait | Expected to work |
+| Same-site video file (HTML5 `<video>`, no MSE) | Works, if it has text tracks | Works live (local test page); Smart Delay cannot wait | Expected to work |
 | Video from another site that allows sharing (CORS) | Expected to work, not tested | Expected to work, not tested | Expected to work |
 | Video from another site without CORS | Not readable | Refused with an explanation (tested) | Expected to work |
 | DRM (Widevine) video | Depends on the site | Not readable (by design) | Silence expected; the app does not get around DRM |

@@ -27,6 +27,7 @@ import android.webkit.CookieManager
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.os.Handler
 import android.os.Looper
@@ -54,11 +55,13 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.aivicventures.subtitletranslator.R
 import com.aivicventures.subtitletranslator.app
+import com.aivicventures.subtitletranslator.browser.AheadSubtitles
 import com.aivicventures.subtitletranslator.browser.BrowserDb
 import com.aivicventures.subtitletranslator.browser.CaptionTrack
 import com.aivicventures.subtitletranslator.browser.CaptionTranslator
 import com.aivicventures.subtitletranslator.browser.Captions
 import com.aivicventures.subtitletranslator.browser.Cue
+import com.aivicventures.subtitletranslator.browser.SoundAhead
 import com.aivicventures.subtitletranslator.live.AudioMode
 import com.aivicventures.subtitletranslator.live.LiveSession
 import com.aivicventures.subtitletranslator.live.LiveSubtitleService
@@ -76,8 +79,11 @@ import org.json.JSONObject
  * The built-in movie browser: tabs, address bar, bookmarks, history and full-screen video in
  * Android's WebView, with English subtitles drawn over the page by this app.
  *
- * Subtitles come from the shared live engine ([LiveSubtitleService] in [AudioMode.PAGE]). The
- * sound is read in the page itself (assets/browser/page.js, Web Audio), which needs no
+ * Subtitles are made ahead of the video where possible, so Smart Delay can hold the video
+ * until enough English is ready: from the video's own captions ([CaptionTranslator]), or from
+ * the sound the site's player has already loaded ([SoundAhead]). Otherwise they come from the
+ * shared live engine ([LiveSubtitleService] in [AudioMode.PAGE]), which hears the sound as it
+ * plays. The sound is read in the page itself (assets/browser/page.js), which needs no
  * permission; where a site does not allow that, the viewer can choose internal audio (screen
  * capture consent) or the microphone. Nothing is downloaded: the page plays as it normally
  * would and only its sound, while subtitles are on, is recognised on the phone.
@@ -90,6 +96,11 @@ class BrowserActivity : ComponentActivity() {
         var player: JavaScriptReplyProxy? = null
         /** Every frame of the page that runs the page script (from its hello), for commands to all. */
         val frames = ArrayList<JavaScriptReplyProxy>()
+        /** The frame whose player loads the sound ahead (Media Source Extensions), for [SoundAhead]. */
+        var mse: JavaScriptReplyProxy? = null
+        var mseDrm = false
+        /** Sound ahead did not work on this page: its sound is heard as it plays. */
+        var soundFailed = false
     }
 
     private val db by lazy { BrowserDb(this) }
@@ -119,6 +130,7 @@ class BrowserActivity : ComponentActivity() {
     private lateinit var subtitleButton: MaterialButton
     private lateinit var sourceButton: MaterialButton
     private lateinit var qualityButton: MaterialButton
+    private lateinit var delayButton: MaterialButton
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
@@ -139,6 +151,13 @@ class BrowserActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
     private var captionTracks: List<CaptionTrack> = emptyList()
     private var captions: CaptionTranslator? = null
+    /** Subtitles from the sound the site's player loaded ahead. */
+    private var sound: SoundAhead? = null
+    /** Whichever makes subtitles ahead of the video now (captions or sound), or null. */
+    private val ahead: AheadSubtitles? get() = captions ?: sound
+    private var videoDuration = 0.0
+    /** When the sound was asked for, or the video last started playing without any yet. */
+    private var soundAskedAt = 0L
     private var captionProblem: String? = null
     /** Smart Delay paused the video and will resume it; a pause by the viewer is never undone. */
     private var heldBySmartDelay = false
@@ -146,6 +165,8 @@ class BrowserActivity : ComponentActivity() {
     private var needFullBuffer = false
     /** The viewer pressed play while Smart Delay waited: no new hold before this time. */
     private var noHoldUntil = 0L
+    /** When Smart Delay last paused the video. */
+    private var holdSentAt = 0L
     private var lastStatusAt = 0L
     private val captionTick = object : Runnable {
         override fun run() {
@@ -266,6 +287,9 @@ class BrowserActivity : ComponentActivity() {
         subtitleButton = tonalButton(getString(R.string.browser_subtitles_start), R.drawable.ic_closed_caption) { toggleSubtitles() }
         sourceButton = button("", R.drawable.ic_mic, R.attr.appTextButtonStyle) { chooseSource() }
         qualityButton = button("", 0, R.attr.appTextButtonStyle) { chooseQuality() }
+        delayButton = button("", R.drawable.ic_timer, R.attr.appTextButtonStyle) { chooseSmartDelay() }.apply {
+            contentDescription = getString(R.string.browser_smart_delay)
+        }
         val settingsButton = iconButton(R.drawable.ic_settings, getString(R.string.live_settings_title)) {
             startActivity(Intent(this, LiveSettingsActivity::class.java))
         }
@@ -274,13 +298,14 @@ class BrowserActivity : ComponentActivity() {
             setPadding(dp(12), dp(6), dp(12), dp(6))
             setBackgroundColor(themeColor(com.google.android.material.R.attr.colorSurfaceContainer))
             addView(statusView)
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+            // Wraps to a second row on a narrow phone, so Smart Delay stays in sight.
+            addView(com.google.android.material.chip.ChipGroup(context).apply {
+                chipSpacingHorizontal = 0
+                chipSpacingVertical = 0
                 addView(subtitleButton)
                 addView(sourceButton)
                 addView(qualityButton)
-                addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                addView(delayButton)
                 addView(settingsButton)
             })
         }
@@ -363,12 +388,27 @@ class BrowserActivity : ComponentActivity() {
                 }
             }
 
+            // The start page (the video site directory) comes from the app's own assets; nothing
+            // else is served from that address, so pages cannot read the app's files through it.
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                val u = request.url
+                if (u.host != ASSET_HOST) return null
+                return if (u.scheme == "https" && u.path == DIRECTORY_PATH) {
+                    WebResourceResponse("text/html", "utf-8", assets.open("browser/sites.html"))
+                } else {
+                    WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), "".byteInputStream())
+                }
+            }
+
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 t.url = url
                 t.player = null
                 t.frames.clear()
+                t.mse = null
+                t.mseDrm = false
+                t.soundFailed = false
                 if (t === tab) {
-                    address.setText(url)
+                    address.setText(shownUrl(url))
                     progress.visibility = View.VISIBLE
                     resetVideo()
                 }
@@ -379,10 +419,10 @@ class BrowserActivity : ComponentActivity() {
                 t.title = view.title ?: url
                 if (t === tab) {
                     progress.visibility = View.INVISIBLE
-                    if (!address.hasFocus()) address.setText(url)
+                    if (!address.hasFocus()) address.setText(shownUrl(url))
                     updateControls()
                 }
-                if (url.startsWith("http")) db.visit(url, t.title)
+                if (url.startsWith("http") && url != HOME) db.visit(url, t.title)
             }
         }
         web.webChromeClient = object : WebChromeClient() {
@@ -431,7 +471,7 @@ class BrowserActivity : ComponentActivity() {
         val t = tab ?: return
         webHolder.addView(t.web, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         t.web.onResume()
-        address.setText(t.url)
+        address.setText(shownUrl(t.url))
         resetVideo()
         updateControls()
     }
@@ -453,6 +493,9 @@ class BrowserActivity : ComponentActivity() {
             else -> updateControls()
         }
     }
+
+    /** The address bar stays empty (showing its hint) on the start page. */
+    private fun shownUrl(url: String) = if (url == HOME) "" else url
 
     private fun go(input: String) {
         val url = BrowserDb.toUrl(input, searchTemplate)
@@ -498,8 +541,9 @@ class BrowserActivity : ComponentActivity() {
         val url = t?.url.orEmpty()
         PopupMenu(this, anchor).apply {
             val bookmarked = url.startsWith("http") && db.isBookmarked(url)
+            menu.add(0, 10, 0, R.string.browser_directory)
             menu.add(0, 1, 0, R.string.browser_new_tab)
-            if (url.startsWith("http")) menu.add(0, 2, 0, if (bookmarked) R.string.browser_bookmark_remove else R.string.browser_bookmark_add)
+            if (url.startsWith("http") && url != HOME) menu.add(0, 2, 0, if (bookmarked) R.string.browser_bookmark_remove else R.string.browser_bookmark_add)
             menu.add(0, 3, 0, R.string.browser_bookmarks)
             menu.add(0, 4, 0, R.string.browser_history)
             menu.add(0, 5, 0, R.string.browser_search_engine)
@@ -518,6 +562,7 @@ class BrowserActivity : ComponentActivity() {
                     7 -> showHelp()
                     8 -> chooseSmartDelay()
                     9 -> startActivity(Intent(this@BrowserActivity, LiveActivity::class.java))
+                    10 -> t?.web?.loadUrl(HOME) ?: newTab(HOME)
                 }
                 true
             }
@@ -660,6 +705,34 @@ class BrowserActivity : ComponentActivity() {
                 }
                 c.add(list)
             }
+            "mse" -> {
+                if (t !== tab) return
+                // A frame without a sound buffer (an advert, say) must not hide the main player's.
+                if (m.optBoolean("audio")) {
+                    t.mse = reply
+                    t.mseDrm = m.optBoolean("drm")
+                }
+                Log.i(TAG, "page player: sound buffer=${m.optBoolean("audio")} muxed=${m.optBoolean("muxed")} drm=${m.optBoolean("drm")}")
+                // Started before the site's player set up its sound buffer: live subtitles were
+                // used; the sound it loads ahead is better (Smart Delay can wait for it).
+                if (m.optBoolean("audio") && !t.mseDrm && !t.soundFailed && ownSession && isPageSession() && LiveSession.state.value.running &&
+                    sound == null && captions == null
+                ) {
+                    Log.i(TAG, "sound buffer appeared: live subtitles give way to sound ahead")
+                    startSound()
+                }
+            }
+            "seg" -> {
+                if (t !== tab) return
+                sound?.addPiece(
+                    m.optInt("sb"), m.optBoolean("init"), m.optString("data"), m.optDouble("to", 0.0),
+                    m.optBoolean("seq"), m.optDouble("t0", -1.0), m.optDouble("t1", -1.0),
+                )
+            }
+            "seg-error" -> {
+                if (t !== tab || sound == null) return
+                onSoundFailed(m.optString("why"))
+            }
             "cues-error" -> {
                 if (t !== tab) return
                 captionProblem = m.optString("why")
@@ -672,7 +745,7 @@ class BrowserActivity : ComponentActivity() {
                 val ev = m.optString("ev")
                 if (ev == "play" || ev == "playing") t.player = reply
                 val reported = m.optDouble("t", 0.0)
-                if (ev == "time" && captions != null && Log.isLoggable(TAG, Log.DEBUG)) {
+                if (ev == "time" && ahead != null && Log.isLoggable(TAG, Log.DEBUG)) {
                     Log.d(TAG, "clock drift %.3f s".format(java.util.Locale.ROOT, reported - currentVideoTime()))
                 }
                 videoTime = reported
@@ -680,6 +753,10 @@ class BrowserActivity : ComponentActivity() {
                 videoRate = m.optDouble("rate", 1.0)
                 videoPlaying = !m.optBoolean("paused", true) && ev != "ended" && ev != "emptied"
                 videoDrm = m.optBoolean("drm", false)
+                val d = m.optDouble("d", -1.0)
+                videoDuration = if (d > 0) d else 0.0
+                sound?.duration = videoDuration
+                if (ev == "playing" && sound?.piecesReceived == 0) soundAskedAt = SystemClock.elapsedRealtime()
                 val w = m.optInt("w", 0)
                 val h = m.optInt("h", 0)
                 if (w > 0 && h > 0) videoLandscape = w >= h
@@ -688,13 +765,17 @@ class BrowserActivity : ComponentActivity() {
                     // The lines being worked on belong to the old position.
                     LiveSubtitleService.resync()
                 }
-                captions?.let { c ->
+                ahead?.let { c ->
                     if (ev == "seeking" || ev == "seeked") {
                         c.position = videoTime
                         needFullBuffer = smartDelaySec > 0
                     }
-                    if ((ev == "play" || ev == "playing") && heldBySmartDelay && !resumeSent) {
-                        // The viewer chose to play now: respect it.
+                    // The viewer chose to play now: respect it. A play event within a moment of
+                    // the hold is the start that the hold interrupted ("play" and "playing"
+                    // arrive apart), not the viewer.
+                    if ((ev == "play" || ev == "playing") && heldBySmartDelay && !resumeSent &&
+                        SystemClock.elapsedRealtime() - holdSentAt > HOLD_SETTLE_MS
+                    ) {
                         heldBySmartDelay = false
                         needFullBuffer = false
                         noHoldUntil = SystemClock.elapsedRealtime() + 10_000
@@ -734,6 +815,8 @@ class BrowserActivity : ComponentActivity() {
 
     private fun resetVideo() {
         if (captions != null) stopCaptions()
+        if (sound != null) stopSound()
+        videoDuration = 0.0
         captionTracks = emptyList()
         captionProblem = null
         videoTime = 0.0
@@ -751,6 +834,10 @@ class BrowserActivity : ComponentActivity() {
     private fun toggleSubtitles() {
         if (captions != null) {
             stopCaptions()
+            return
+        }
+        if (sound != null) {
+            stopSound()
             return
         }
         if (LiveSession.state.value.running) {
@@ -789,7 +876,9 @@ class BrowserActivity : ComponentActivity() {
                     showStatusOnce(getString(R.string.browser_webview_old))
                     return
                 }
-                startSession(AudioMode.PAGE)
+                // The sound the player loads ahead when it can be read; else the sound as it plays.
+                val t = tab
+                if (t?.mse != null && !t.mseDrm && !t.soundFailed) startSound() else startSession(AudioMode.PAGE)
             }
             Source.INTERNAL -> {
                 if (Build.VERSION.SDK_INT < 29) {
@@ -890,8 +979,8 @@ class BrowserActivity : ComponentActivity() {
     }
 
     private fun renderLines(s: LiveSession.State) {
-        // Captions are drawn by video time in onCaptionTick.
-        if (captions != null) return
+        // Subtitles made ahead are drawn by video time in onCaptionTick.
+        if (ahead != null) return
         val text = if (s.running) s.lines.joinToString("\n") { it.text } else ""
         renderText(text, s.lines.lastOrNull()?.provisional == true)
     }
@@ -911,7 +1000,7 @@ class BrowserActivity : ComponentActivity() {
         forwardButton.isEnabled = t?.web?.canGoForward() == true
         tabsButton.text = tabs.size.toString()
         val s = LiveSession.state.value
-        val on = s.running || captions != null
+        val on = s.running || ahead != null
         subtitleButton.text = getString(if (on) R.string.browser_subtitles_stop else R.string.browser_subtitles_start)
         subtitleButton.setIconResource(if (on) R.drawable.ic_stop else R.drawable.ic_closed_caption)
         // Short on the button (the bar must fit a phone); the full wording is in the choice dialog.
@@ -926,6 +1015,7 @@ class BrowserActivity : ComponentActivity() {
         )
         sourceButton.setIconResource(if (source == Source.CAPTIONS) R.drawable.ic_subtitles else if (source == Source.INTERNAL) R.drawable.ic_audio else R.drawable.ic_mic)
         qualityButton.text = getString(if (live.quality == Quality.FAST) R.string.live_quality_fast else R.string.live_quality_high)
+        delayButton.text = if (smartDelaySec > 0) getString(R.string.browser_delay_value, smartDelaySec) else getString(R.string.browser_delay_off)
         statusView.text = statusText(s)
     }
 
@@ -946,6 +1036,8 @@ class BrowserActivity : ComponentActivity() {
             }
             if (smartDelaySec > 0) parts += getString(R.string.browser_smart_delay_on, smartDelaySec)
             if (live.showLatency && c.msPerCue > 0) parts += getString(R.string.browser_captions_speed, c.msPerCue)
+        } else if (sound != null) {
+            soundStatus(sound!!, parts)
         } else if (!s.running) {
             parts += when {
                 s.phase == LiveSession.Phase.ERROR && s.error != null -> s.error
@@ -967,11 +1059,34 @@ class BrowserActivity : ComponentActivity() {
             if (s.language.isNotEmpty()) parts += Languages.name(s.language)
             if (s.fallingBehind) parts += getString(R.string.browser_status_behind)
             s.latency?.let { l -> if (live.showLatency && l.totalMs > 0) parts += getString(R.string.browser_status_delay, l.totalMs / 1000.0) }
-            // Smart Delay needs upcoming dialogue; sound is only heard as it plays.
+            // Smart Delay needs dialogue ahead of the picture; this sound is only heard as it plays.
             if (smartDelaySec > 0) parts += getString(R.string.browser_smart_delay_unsupported)
         }
         if (videoRate != 1.0 && videoPlaying) parts += getString(R.string.browser_status_speed, videoRate)
         return parts.joinToString(" · ")
+    }
+
+    private fun soundStatus(so: SoundAhead, parts: ArrayList<String>) {
+        val now = currentVideoTime()
+        val target = smartDelaySec
+        val lang = so.language.takeIf { it.isNotEmpty() }?.let { Languages.name(it) }
+        parts += when {
+            so.state == SoundAhead.State.LOADING -> getString(R.string.live_phase_loading)
+            heldBySmartDelay -> getString(R.string.browser_captions_building, so.doneAhead(now).toInt().coerceAtMost(target), target)
+            !so.holdable -> getString(R.string.browser_sound_waiting)
+            so.lineCount() == 0 -> getString(R.string.browser_status_transcribing)
+            lang != null -> getString(R.string.browser_sound_active_lang, lang)
+            else -> getString(R.string.browser_sound_active)
+        }
+        if (target > 0) {
+            parts += getString(R.string.browser_smart_delay_on, target)
+            // The site's player loads less than the chosen delay: say so rather than wait forever.
+            val loaded = so.loadedAhead(now)
+            if (!heldBySmartDelay && so.holdable && loaded < target - 2 && so.doneAhead(now) >= loaded - 4) {
+                parts += getString(R.string.browser_sound_site_limit, loaded.toInt())
+            }
+        }
+        if (live.showLatency && so.speed > 0) parts += getString(R.string.browser_sound_speed, so.speed)
     }
 
     private fun showStatusOnce(text: String) {
@@ -1032,7 +1147,19 @@ class BrowserActivity : ComponentActivity() {
     }
 
     private fun onCaptionTick() {
-        val c = captions ?: return
+        val so = sound
+        if (so != null) {
+            if (so.state == SoundAhead.State.FAILED) {
+                onSoundFailed(so.problem ?: "decode")
+                return
+            }
+            // The page passed on no sound although the video plays: hear it as it plays instead.
+            if (so.piecesReceived == 0 && videoPlaying && SystemClock.elapsedRealtime() - soundAskedAt > NO_SOUND_MS) {
+                onSoundFailed("none")
+                return
+            }
+        }
+        val c = ahead ?: return
         val t = currentVideoTime()
         if (kotlin.math.abs(c.position - t) > 0.5) c.position = t
         val text = c.textAt(t).first
@@ -1050,14 +1177,13 @@ class BrowserActivity : ComponentActivity() {
     }
 
     /**
-     * Smart Delay (captions only): the video waits until [smartDelaySec] seconds ahead are in
-     * English, after starting and after each seek, and again if translation falls behind.
+     * Smart Delay (captions, or sound the player loaded ahead): the video waits until
+     * [smartDelaySec] seconds ahead are in English, after starting and after each seek, and
+     * again if the work falls behind.
      */
-    private fun smartDelay(c: CaptionTranslator, t: Double) {
+    private fun smartDelay(c: AheadSubtitles, t: Double) {
         val target = smartDelaySec
-        val translating = c.state == CaptionTranslator.State.TRANSLATING || c.state == CaptionTranslator.State.LOADING ||
-            c.state == CaptionTranslator.State.READY
-        if (target <= 0 || !translating || c.cueCount() == 0) {
+        if (target <= 0 || !c.holdable) {
             if (heldBySmartDelay) resumeVideo()
             return
         }
@@ -1073,6 +1199,7 @@ class BrowserActivity : ComponentActivity() {
         if ((needFullBuffer && ahead < target) || ahead < HOLD_BELOW_SEC) {
             needFullBuffer = true
             heldBySmartDelay = true
+            holdSentAt = SystemClock.elapsedRealtime()
             Log.i(TAG, "smart delay: hold at %.1f s, %.1f s ready".format(java.util.Locale.ROOT, t, ahead))
             sendCommand("{\"cmd\":\"hold\"}")
             updateControls()
@@ -1101,6 +1228,54 @@ class BrowserActivity : ComponentActivity() {
         b.show()
     }
 
+    private fun startSound() {
+        val frame = tab?.mse ?: return
+        // One source at a time: a live session of this screen ends.
+        if (LiveSession.state.value.running) stopSession()
+        sound = SoundAhead(this, live.quality) { main.post { if (sound != null) updateControls() } }.also {
+            it.position = currentVideoTime()
+            it.duration = videoDuration
+        }
+        heldBySmartDelay = false
+        resumeSent = false
+        needFullBuffer = smartDelaySec > 0
+        noHoldUntil = 0
+        soundAskedAt = SystemClock.elapsedRealtime()
+        Log.i(TAG, "sound ahead on: smartDelay=$smartDelaySec quality=${live.quality}")
+        runCatching { frame.postMessage("{\"cmd\":\"segs\",\"on\":true}") }
+        main.removeCallbacks(captionTick)
+        main.post(captionTick)
+        updateControls()
+    }
+
+    private fun stopSound() {
+        main.removeCallbacks(captionTick)
+        tab?.mse?.let { f -> runCatching { f.postMessage("{\"cmd\":\"segs\",\"on\":false}") } }
+        if (heldBySmartDelay) sendCommand("{\"cmd\":\"resume\"}")
+        heldBySmartDelay = false
+        sound?.close()
+        sound = null
+        renderText("", false)
+        updateControls()
+    }
+
+    /**
+     * The sound the player loaded cannot be used: protected video gets the explanation and the
+     * other sources; otherwise the same sound is heard as it plays (no new permission, but
+     * Smart Delay cannot wait for it), and the viewer is told.
+     */
+    private fun onSoundFailed(why: String) {
+        Log.i(TAG, "sound ahead unavailable: $why")
+        tab?.soundFailed = true
+        stopSound()
+        if (why == "drm") {
+            onTapFailed("drm")
+            return
+        }
+        showStatusOnce(getString(R.string.browser_sound_live_fallback))
+        startSession(AudioMode.PAGE)
+    }
+
     private fun chooseSmartDelay() {
         val values = Captions.SMART_DELAY_CHOICES
         val labels = values.map { if (it == 0) getString(R.string.browser_smart_delay_off) else getString(R.string.browser_smart_delay_value, it) }.toTypedArray()
@@ -1108,7 +1283,7 @@ class BrowserActivity : ComponentActivity() {
             .setTitle(R.string.browser_smart_delay_title)
             .setSingleChoiceItems(labels, values.indexOf(smartDelaySec).coerceAtLeast(0)) { d, which ->
                 smartDelaySec = values[which]
-                needFullBuffer = smartDelaySec > 0 && captions != null
+                needFullBuffer = smartDelaySec > 0 && ahead != null
                 d.dismiss()
                 updateControls()
             }
@@ -1136,6 +1311,8 @@ class BrowserActivity : ComponentActivity() {
         main.removeCallbacks(captionTick)
         captions?.close()
         captions = null
+        sound?.close()
+        sound = null
         tabs.forEach { it.web.destroy() }
         tabs.clear()
         super.onDestroy()
@@ -1147,6 +1324,13 @@ class BrowserActivity : ComponentActivity() {
         private const val CAPTION_TICK_MS = 100L
         /** Smart Delay holds the video when less than this is translated ahead. */
         private const val HOLD_BELOW_SEC = 1.0
-        const val HOME = "https://duckduckgo.com/"
+        /** Play events this soon after a hold belong to the start it interrupted. */
+        private const val HOLD_SETTLE_MS = 1500L
+        /** No sound from the page this long after asking, while the video plays: hear it as it plays. */
+        private const val NO_SOUND_MS = 8000L
+        private const val ASSET_HOST = "appassets.androidplatform.net"
+        private const val DIRECTORY_PATH = "/browser/sites.html"
+        /** Start page of every new tab: the foreign video site directory (assets/browser/sites.html). */
+        const val HOME = "https://$ASSET_HOST$DIRECTORY_PATH"
     }
 }

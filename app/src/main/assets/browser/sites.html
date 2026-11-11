@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foreign video sites</title>
+<!-- The built-in browser's start page: a directory of official video sites in other
+     languages. It is bundled with the app; nothing is fetched to show it. -->
+<style>
+:root {
+  --bg: #f7f8fa; --card: #ffffff; --text: #1b1d21; --muted: #5d636e; --line: #e2e5ea;
+  --accent: #2f5bd3; --accent-bg: #e8eefc; --ok: #1d7a46; --ok-bg: #e3f4ea; --warn: #8a5a00; --warn-bg: #fbf0db;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121418; --card: #1c1f25; --text: #e8eaee; --muted: #a0a6b1; --line: #2c3038;
+    --accent: #8fb0ff; --accent-bg: #1f2a44; --ok: #7fd6a3; --ok-bg: #173225; --warn: #f0c46b; --warn-bg: #3a2e14;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+h1 { font-size: 22px; margin: 4px 0 4px; }
+.lead { color: var(--muted); margin: 0 0 14px; }
+.filter { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); font-size: 16px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.chip { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 16px; padding: 5px 11px; font-size: 13px; }
+.chip[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+a.site { display: block; text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; }
+a.site:active { border-color: var(--accent); }
+.name { font-weight: 600; font-size: 16px; }
+.host { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.what { margin-top: 3px; font-size: 13px; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.tag { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--accent-bg); color: var(--accent); }
+.tag.ok { background: var(--ok-bg); color: var(--ok); }
+.tag.warn { background: var(--warn-bg); color: var(--warn); }
+.empty { color: var(--muted); padding: 20px 0; display: none; }
+.notes { margin-top: 26px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 12px; }
+.notes p { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Foreign video sites</h1>
+  <p class="lead">Official video sites in other languages. Open one, play a video, then tap <b>Start AI subtitles</b> for English.</p>
+  <input class="filter" id="filter" type="search" placeholder="Filter by name, language or country" aria-label="Filter sites" autocomplete="off">
+  <div class="chips" id="chips" role="group" aria-label="Regions"></div>
+  <div id="list"></div>
+  <p class="empty" id="empty">No site matches. Type a web address or a search in the address bar above.</p>
+  <div class="notes">
+    <p><b>Tested with Smart Delay</b>: tried in this app on the Android emulator (subtitles made ahead from the site's sound). The other sites have not been tried yet.</p>
+    <p><b>Smart Delay</b> works where the site's player loads the sound ahead, as most do. Protected (DRM) videos, videos that need a sign-in or a subscription, and videos limited to the site's own country may not play, or their sound cannot be read.</p>
+    <p>The app is not affiliated with these sites. Their own terms apply.</p>
+  </div>
+</main>
+<script>
+// [name, url, what, languages, region, flags]  flags: t = tested, c = often limited to its country, s = sign-in or subscription for much of it
+var SITES = [
+  ['Bilibili TV', 'https://www.bilibili.tv/en/', 'Anime, Chinese and Asian dramas', 'Chinese, Japanese', 'East Asia', 't'],
+  ['Bilibili', 'https://www.bilibili.com/', 'China’s video community', 'Chinese', 'East Asia', ''],
+  ['iQIYI', 'https://www.iq.com/', 'Chinese, Korean and Thai dramas', 'Chinese, Korean, Thai', 'East Asia', 's'],
+  ['WeTV', 'https://wetv.vip/', 'Chinese dramas and variety', 'Chinese', 'East Asia', 's'],
+  ['Youku', 'https://www.youku.com/', 'Chinese films and series', 'Chinese', 'East Asia', 'c'],
+  ['CCTV', 'https://tv.cctv.com/', 'Chinese television', 'Chinese', 'East Asia', ''],
+  ['KBS World', 'https://world.kbs.co.kr/', 'Korean television', 'Korean', 'East Asia', ''],
+  ['Naver TV', 'https://tv.naver.com/', 'Korean clips and shows', 'Korean', 'East Asia', ''],
+  ['TVer', 'https://tver.jp/', 'Japanese television catch-up', 'Japanese', 'East Asia', 'c'],
+  ['ABEMA', 'https://abema.tv/', 'Japanese anime, drama and news', 'Japanese', 'East Asia', 'c'],
+  ['NHK World-Japan', 'https://www3.nhk.or.jp/nhkworld/', 'Japanese broadcaster, many languages', 'Japanese and others', 'East Asia', ''],
+  ['Dailymotion', 'https://www.dailymotion.com/', 'Videos and TV clips from everywhere', 'Many languages', 'Southeast Asia', 't'],
+  ['Viu', 'https://www.viu.com/', 'Korean, Thai and Asian dramas', 'Korean, Thai, Malay, Indonesian', 'Southeast Asia', 'c'],
+  ['GMA Network', 'https://www.gmanetwork.com/', 'Philippine news and shows', 'Filipino', 'Southeast Asia', ''],
+  ['iWantTFC', 'https://www.iwanttfc.com/', 'Philippine series and films', 'Filipino', 'Southeast Asia', 's'],
+  ['VTV Go', 'https://vtvgo.vn/', 'Vietnamese television', 'Vietnamese', 'Southeast Asia', 'c'],
+  ['CH3Plus', 'https://ch3plus.com/', 'Thai dramas', 'Thai', 'Southeast Asia', ''],
+  ['Vidio', 'https://www.vidio.com/', 'Indonesian series and sport', 'Indonesian', 'Southeast Asia', 's'],
+  ['MX Player', 'https://www.mxplayer.in/', 'Hindi films and series', 'Hindi', 'South Asia', 'c'],
+  ['ARTE', 'https://www.arte.tv/', 'European culture and documentaries', 'French, German', 'Europe', ''],
+  ['ARD Mediathek', 'https://www.ardmediathek.de/', 'German public television', 'German', 'Europe', 'c'],
+  ['ZDF', 'https://www.zdf.de/', 'German public television', 'German', 'Europe', 'c'],
+  ['DW', 'https://www.dw.com/', 'German broadcaster, many languages', 'German and others', 'Europe', ''],
+  ['france.tv', 'https://www.france.tv/', 'French public television', 'French', 'Europe', 'c'],
+  ['RaiPlay', 'https://www.raiplay.it/', 'Italian public television', 'Italian', 'Europe', 'c'],
+  ['Mediaset Infinity', 'https://www.mediasetinfinity.mediaset.it/', 'Italian television', 'Italian', 'Europe', 'c'],
+  ['RTVE Play', 'https://www.rtve.es/play/', 'Spanish public television', 'Spanish', 'Europe', ''],
+  ['atresplayer', 'https://www.atresplayer.com/', 'Spanish series and shows', 'Spanish', 'Europe', 's'],
+  ['RTP Play', 'https://www.rtp.pt/play/', 'Portuguese public television', 'Portuguese', 'Europe', ''],
+  ['NPO Start', 'https://npo.nl/start', 'Dutch public television', 'Dutch', 'Europe', 'c'],
+  ['SVT Play', 'https://www.svtplay.se/', 'Swedish public television', 'Swedish', 'Europe', 'c'],
+  ['TVP VOD', 'https://vod.tvp.pl/', 'Polish public television', 'Polish', 'Europe', ''],
+  ['Canela.TV', 'https://www.canela.tv/', 'Spanish-language films and series', 'Spanish', 'Americas', ''],
+  ['Pluto TV', 'https://pluto.tv/', 'Free channels in many countries', 'Spanish, Portuguese and others', 'Americas', 'c'],
+  ['Al Jazeera', 'https://www.aljazeera.net/', 'Arabic news and documentaries', 'Arabic', 'Middle East', ''],
+  ['Shahid', 'https://shahid.mbc.net/', 'Arabic series and films', 'Arabic', 'Middle East', 's'],
+  ['tabii', 'https://www.tabii.com/', 'Turkish series (TRT)', 'Turkish', 'Middle East', 'c'],
+  ['Internet Archive films', 'https://archive.org/details/feature_films', 'Public-domain feature films', 'Many languages', 'Archives', '']
+];
+
+var REGIONS = ['All'];
+SITES.forEach(function (s) { if (REGIONS.indexOf(s[4]) < 0) REGIONS.push(s[4]); });
+var region = 'All';
+var list = document.getElementById('list');
+var filter = document.getElementById('filter');
+var chips = document.getElementById('chips');
+
+function el(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function card(s) {
+  var a = el('a', 'site');
+  a.href = s[1];
+  a.appendChild(el('div', 'name', s[0]));
+  a.appendChild(el('div', 'host', s[1].replace(/^https:\/\/(www\.)?/, '').replace(/\/$/, '')));
+  a.appendChild(el('div', 'what', s[2]));
+  var tags = el('div', 'tags');
+  tags.appendChild(el('span', 'tag', s[3]));
+  if (s[5].indexOf('t') >= 0) tags.appendChild(el('span', 'tag ok', 'Tested with Smart Delay'));
+  if (s[5].indexOf('c') >= 0) tags.appendChild(el('span', 'tag warn', 'Often its country only'));
+  if (s[5].indexOf('s') >= 0) tags.appendChild(el('span', 'tag warn', 'Sign-in for much of it'));
+  a.appendChild(tags);
+  return a;
+}
+
+function render() {
+  var q = filter.value.trim().toLowerCase();
+  list.textContent = '';
+  var shown = 0;
+  REGIONS.slice(1).forEach(function (r) {
+    if (region !== 'All' && region !== r) return;
+    var rows = SITES.filter(function (s) {
+      return s[4] === r && (!q || (s[0] + ' ' + s[1] + ' ' + s[2] + ' ' + s[3] + ' ' + s[4]).toLowerCase().indexOf(q) >= 0);
+    });
+    if (!rows.length) return;
+    list.appendChild(el('h2', null, r));
+    var grid = el('div', 'grid');
+    rows.forEach(function (s) { grid.appendChild(card(s)); });
+    list.appendChild(grid);
+    shown += rows.length;
+  });
+  document.getElementById('empty').style.display = shown ? 'none' : 'block';
+}
+
+REGIONS.forEach(function (r) {
+  var b = el('button', 'chip', r);
+  b.type = 'button';
+  b.setAttribute('aria-pressed', r === region ? 'true' : 'false');
+  b.addEventListener('click', function () {
+    region = r;
+    Array.prototype.forEach.call(chips.children, function (c) { c.setAttribute('aria-pressed', c.textContent === r ? 'true' : 'false'); });
+    render();
+  });
+  chips.appendChild(b);
+});
+filter.addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
