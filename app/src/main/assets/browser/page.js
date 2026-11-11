@@ -1,10 +1,12 @@
 // Injected at document start into every frame of pages opened in the built-in browser.
 // It reports what the page's videos do (play, pause, seek, speed, time) and, only after the
 // viewer starts AI subtitles, either passes on the sound the page's player has already loaded
-// ahead (Media Source Extensions, see "Sound ahead"), or taps the playing video's sound with the
-// Web Audio API and hands it to the app as 16 kHz mono PCM. It never downloads media, never
-// touches protected (DRM) video and never taps media that the page's origin may not read,
-// because Chromium would return silence for it and the viewer would lose the sound as well.
+// ahead (Media Source Extensions, see "Sound ahead"; for Smart Delay the waiting video can be
+// moved forward and back so the site's player loads more, see "Scan ahead"), or taps the playing
+// video's sound with the Web Audio API and hands it to the app as 16 kHz mono PCM. It never
+// downloads media, never touches protected (DRM) video and never taps media that the page's
+// origin may not read, because Chromium would return silence for it and the viewer would lose
+// the sound as well.
 (function () {
   'use strict';
   if (window.__subtransPage) return;
@@ -55,6 +57,7 @@
       if (type === 'loadedmetadata' || type === 'play') watchTracks(v);
       // Only the video being watched: a muted preview elsewhere on the page must not interfere.
       if (current && v !== current) return;
+      if (scan && v === scan.v) { onScanEvent(type, v); return; }
       media(type, v);
       if (tapOn && type === 'playing') tap(v);
     }, true);
@@ -729,6 +732,64 @@
     }
   })();
 
+  // ---- Scan ahead (Smart Delay) ----
+  // A site's player loads the sound only so far ahead of the playhead (often about 30 s). While
+  // the video waits for Smart Delay, the app can ask for more: the same, visible video is moved
+  // forward (muted, its picture hidden) so that the site's own player loads from there, and it
+  // is moved back to where it waits once enough is loaded. This script fetches nothing itself.
+  // The viewer's own Play ends it at once. The video's events during it are not reported.
+  var scan = null;
+
+  function scanTo(to) {
+    var v = scan ? scan.v : (current || capVideo);
+    if (!v || v.mediaKeys || !isFinite(v.duration)) { post({ type: 'scan', ok: false, why: 'novideo' }); return; }
+    if (!scan) {
+      if (!v.paused) v.pause();
+      scan = { v: v, home: v.currentTime, muted: v.muted, opacity: v.style.opacity, back: false };
+      v.muted = true;
+      v.style.opacity = '0';
+    }
+    try {
+      v.currentTime = Math.min(Math.max(0, to), Math.max(0, v.duration - 1));
+    } catch (e) {
+      scanEnd(false);
+    }
+  }
+
+  function onScanEvent(type, v) {
+    if (type === 'seeked' && !scan.back) post({ type: 'scan', ok: true, at: v.currentTime });
+    if (type === 'play' && !scan.back) {
+      // The viewer pressed Play: back to where the video waited, and play from there.
+      if (navigator.userActivation && navigator.userActivation.isActive) scanEnd(true);
+      else v.pause(); // the site's player resumed by itself after the jump
+    }
+  }
+
+  function scanEnd(play) {
+    var s = scan;
+    if (!s) return;
+    if (s.back) { if (play) s.play = true; return; }
+    s.back = true;
+    s.play = play;
+    var v = s.v;
+    var timer = 0;
+    var finish = function () {
+      v.removeEventListener('seeked', finish);
+      clearTimeout(timer);
+      if (scan !== s) return;
+      v.muted = s.muted;
+      v.style.opacity = s.opacity;
+      scan = null;
+      media('pause', v);
+      if (s.play) { var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+    };
+    v.addEventListener('seeked', finish);
+    timer = setTimeout(finish, 4000);
+    try { if (!v.paused) v.pause(); v.currentTime = s.home; } catch (e) { finish(); }
+  }
+
+  window.addEventListener('pagehide', function () { if (scan) { scan.v.muted = scan.muted; scan.v.style.opacity = scan.opacity; } });
+
   bridge.onmessage = function (e) {
     var m;
     try { m = JSON.parse(e.data); } catch (err) { return; }
@@ -736,7 +797,12 @@
       tapOn = !!m.on;
       if (tapOn && current && !current.paused) tap(current);
     } else if (m.cmd === 'segs') {
+      if (!m.on) scanEnd(false);
       segsOn(!!m.on);
+    } else if (m.cmd === 'scan') {
+      if (typeof m.to === 'number') scanTo(m.to);
+    } else if (m.cmd === 'scan-end') {
+      scanEnd(false);
     } else if (m.cmd === 'captions') {
       if (m.on) captionsOn(m.i | 0); else captionsOff();
     } else if (m.cmd === 'hold') {
@@ -745,7 +811,8 @@
       if (hv && !hv.paused) hv.pause();
     } else if (m.cmd === 'resume') {
       var rv = current || capVideo;
-      if (rv && rv.paused) { var p = rv.play(); if (p && p.catch) p.catch(function () {}); }
+      if (scan) scanEnd(true);
+      else if (rv && rv.paused) { var p = rv.play(); if (p && p.catch) p.catch(function () {}); }
     } else if (m.cmd === 'tracks') {
       var tv = current || capVideo || document.querySelector('video');
       if (tv) reportTracks(tv);

@@ -163,10 +163,26 @@ class BrowserActivity : ComponentActivity() {
     private var heldBySmartDelay = false
     /** After starting or a seek, Smart Delay waits for the whole buffer, not just the next line. */
     private var needFullBuffer = false
-    /** The viewer pressed play while Smart Delay waited: no new hold before this time. */
-    private var noHoldUntil = 0L
+    /**
+     * The viewer pressed Play while Smart Delay waited: the video plays on without waiting until
+     * the viewer jumps elsewhere, or chooses the delay or starts subtitles again.
+     */
+    private var viewerOverride = false
+    /** Waiting made no progress for [NO_PROGRESS_MS]: the video plays on (until a jump). */
+    private var gaveUp = false
     /** When Smart Delay last paused the video. */
     private var holdSentAt = 0L
+    /** Progress while waiting: the best ready and loaded seconds seen, and when they last grew. */
+    private var holdBestDone = 0.0
+    private var holdBestLoaded = 0.0
+    private var holdProgressAt = 0L
+    /** Scan ahead: the page is moving the waiting video forward so its player loads more. */
+    private var scanning = false
+    private var scanSteps = 0
+    private var scanLastLoaded = 0.0
+    private var scanStepAt = 0L
+    /** Scanning brought nothing more on this video (until a jump). */
+    private var scanOff = false
     private var lastStatusAt = 0L
     private val captionTick = object : Runnable {
         override fun run() {
@@ -729,6 +745,15 @@ class BrowserActivity : ComponentActivity() {
                     m.optBoolean("seq"), m.optDouble("t0", -1.0), m.optDouble("t1", -1.0),
                 )
             }
+            "scan" -> {
+                if (t !== tab) return
+                if (!m.optBoolean("ok")) {
+                    Log.i(TAG, "scan ahead unavailable: ${m.optString("why")}")
+                    scanning = false
+                    scanOff = true
+                    sound?.scanning = false
+                }
+            }
             "seg-error" -> {
                 if (t !== tab || sound == null) return
                 onSoundFailed(m.optString("why"))
@@ -769,6 +794,7 @@ class BrowserActivity : ComponentActivity() {
                     if (ev == "seeking" || ev == "seeked") {
                         c.position = videoTime
                         needFullBuffer = smartDelaySec > 0
+                        resetSmartDelay()
                     }
                     // The viewer chose to play now: respect it. A play event within a moment of
                     // the hold is the start that the hold interrupted ("play" and "playing"
@@ -778,7 +804,10 @@ class BrowserActivity : ComponentActivity() {
                     ) {
                         heldBySmartDelay = false
                         needFullBuffer = false
-                        noHoldUntil = SystemClock.elapsedRealtime() + 10_000
+                        viewerOverride = true
+                        scanning = false
+                        sound?.scanning = false
+                        Log.i(TAG, "smart delay: the viewer pressed play; no waiting until a jump")
                     }
                     if (ev == "playing") resumeSent = false
                 }
@@ -1035,6 +1064,7 @@ class BrowserActivity : ComponentActivity() {
                 else -> getString(R.string.browser_captions_active, lang)
             }
             if (smartDelaySec > 0) parts += getString(R.string.browser_smart_delay_on, smartDelaySec)
+            if (smartDelaySec > 0 && viewerOverride) parts += getString(R.string.browser_smart_delay_viewer)
             if (live.showLatency && c.msPerCue > 0) parts += getString(R.string.browser_captions_speed, c.msPerCue)
         } else if (sound != null) {
             soundStatus(sound!!, parts)
@@ -1080,6 +1110,9 @@ class BrowserActivity : ComponentActivity() {
         }
         if (target > 0) {
             parts += getString(R.string.browser_smart_delay_on, target)
+            if (viewerOverride) parts += getString(R.string.browser_smart_delay_viewer)
+            else if (gaveUp) parts += getString(R.string.browser_smart_delay_gave_up)
+            else if (scanning) parts += getString(R.string.browser_smart_delay_scanning)
             // The site's player loads less than the chosen delay: say so rather than wait forever.
             val loaded = so.loadedAhead(now)
             if (!heldBySmartDelay && so.holdable && loaded < target - 2 && so.doneAhead(now) >= loaded - 4) {
@@ -1127,7 +1160,7 @@ class BrowserActivity : ComponentActivity() {
         heldBySmartDelay = false
         resumeSent = false
         needFullBuffer = smartDelaySec > 0
-        noHoldUntil = 0
+        resetSmartDelay()
         Log.i(TAG, "captions on: track ${track.index} kind=${track.kind} lang=${track.language.ifEmpty { "-" }} smartDelay=$smartDelaySec beam=$beam")
         sendCommand("{\"cmd\":\"captions\",\"on\":true,\"i\":${track.index}}")
         main.removeCallbacks(captionTick)
@@ -1162,12 +1195,15 @@ class BrowserActivity : ComponentActivity() {
         val c = ahead ?: return
         val t = currentVideoTime()
         if (kotlin.math.abs(c.position - t) > 0.5) c.position = t
-        val text = c.textAt(t).first
+        val text = if (heldBySmartDelay && smartDelaySec > 0) {
+            val ready = ((c as? SoundAhead)?.doneAhead(t) ?: c.readyAhead(t, smartDelaySec.toDouble())).toInt()
+            getString(R.string.browser_smart_delay_overlay, ready.coerceIn(0, smartDelaySec), smartDelaySec)
+        } else c.textAt(t).first
         if (text != shownCaption) {
             shownCaption = text
             if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "caption at %.2f s: %s".format(java.util.Locale.ROOT, t, text.replace("\n", " ")))
         }
-        renderText(text, false)
+        renderText(text, heldBySmartDelay)
         smartDelay(c, t)
         val now = SystemClock.elapsedRealtime()
         if (now - lastStatusAt >= 500) {
@@ -1188,24 +1224,102 @@ class BrowserActivity : ComponentActivity() {
             return
         }
         val ahead = c.readyAhead(t, target.toDouble())
+        val now = SystemClock.elapsedRealtime()
+        val so = c as? SoundAhead
         if (heldBySmartDelay) {
             if (ahead >= target) {
                 needFullBuffer = false
+                endScan()
                 resumeVideo()
+                return
             }
+            // Waiting must lead somewhere: more English ready, or more sound loaded.
+            val done = so?.doneAhead(t) ?: ahead
+            val loaded = so?.loadedAhead(t) ?: 0.0
+            if (done > holdBestDone + 0.5 || loaded > holdBestLoaded + 0.5) {
+                holdBestDone = maxOf(holdBestDone, done)
+                holdBestLoaded = maxOf(holdBestLoaded, loaded)
+                holdProgressAt = now
+            }
+            if (now - holdProgressAt > NO_PROGRESS_MS) {
+                Log.i(TAG, "smart delay: no progress for %d s; playing on".format(java.util.Locale.ROOT, NO_PROGRESS_MS / 1000))
+                gaveUp = true
+                needFullBuffer = false
+                endScan()
+                resumeVideo()
+                return
+            }
+            if (so != null) scanAhead(so, t, target)
             return
         }
-        if (!videoPlaying || SystemClock.elapsedRealtime() < noHoldUntil) return
+        if (!videoPlaying || viewerOverride || gaveUp) return
         if ((needFullBuffer && ahead < target) || ahead < HOLD_BELOW_SEC) {
             needFullBuffer = true
             heldBySmartDelay = true
-            holdSentAt = SystemClock.elapsedRealtime()
+            holdSentAt = now
+            holdBestDone = 0.0
+            holdBestLoaded = 0.0
+            holdProgressAt = now
             Log.i(TAG, "smart delay: hold at %.1f s, %.1f s ready".format(java.util.Locale.ROOT, t, ahead))
             sendCommand("{\"cmd\":\"hold\"}")
             updateControls()
         } else if (needFullBuffer) {
             needFullBuffer = false
         }
+    }
+
+    private fun resetSmartDelay() {
+        viewerOverride = false
+        gaveUp = false
+        scanOff = false
+        scanSteps = 0
+    }
+
+    /**
+     * Scan ahead, while the video waits for sound the site's player has not loaded: once the
+     * player stops loading (nothing new for [SCAN_IDLE_MS]), the page moves the waiting video
+     * to the end of what is loaded, so the player loads on from there. When enough is loaded,
+     * or a step brings nothing more, the video goes back to where it waits.
+     */
+    private fun scanAhead(so: SoundAhead, home: Double, target: Int) {
+        if (scanOff || videoDuration <= 0) return
+        val want = minOf(target + 1.0, videoDuration - home - 0.5)
+        val loaded = so.loadedAhead(home)
+        if (loaded >= want) {
+            endScan()
+            return
+        }
+        // After a jump, the player needs a moment to land and start loading.
+        if (scanning && SystemClock.elapsedRealtime() - scanStepAt < SCAN_STEP_WAIT_MS) return
+        val idle = so.idleMs()
+        if (idle < SCAN_IDLE_MS) return
+        if (scanning && loaded < scanLastLoaded + 1.0) {
+            Log.i(TAG, "scan ahead: nothing more loaded (%.1f s ahead); going back".format(java.util.Locale.ROOT, loaded))
+            scanOff = true
+            endScan()
+            return
+        }
+        if (scanSteps >= MAX_SCAN_STEPS) {
+            scanOff = true
+            endScan()
+            return
+        }
+        scanSteps++
+        scanLastLoaded = loaded
+        scanning = true
+        so.scanning = true
+        scanStepAt = SystemClock.elapsedRealtime()
+        val to = home + maxOf(0.0, loaded - 1.0)
+        Log.i(TAG, "scan ahead: step %d to %.1f s (%.1f of %.0f s loaded)".format(java.util.Locale.ROOT, scanSteps, to, loaded, want))
+        sendCommand("{\"cmd\":\"scan\",\"to\":%.2f}".format(java.util.Locale.ROOT, to))
+    }
+
+    private fun endScan() {
+        if (!scanning) return
+        scanning = false
+        sound?.scanning = false
+        Log.i(TAG, "scan ahead: back to the waiting position")
+        sendCommand("{\"cmd\":\"scan-end\"}")
     }
 
     private fun resumeVideo() {
@@ -1239,7 +1353,7 @@ class BrowserActivity : ComponentActivity() {
         heldBySmartDelay = false
         resumeSent = false
         needFullBuffer = smartDelaySec > 0
-        noHoldUntil = 0
+        resetSmartDelay()
         soundAskedAt = SystemClock.elapsedRealtime()
         Log.i(TAG, "sound ahead on: smartDelay=$smartDelaySec quality=${live.quality}")
         runCatching { frame.postMessage("{\"cmd\":\"segs\",\"on\":true}") }
@@ -1251,6 +1365,7 @@ class BrowserActivity : ComponentActivity() {
     private fun stopSound() {
         main.removeCallbacks(captionTick)
         tab?.mse?.let { f -> runCatching { f.postMessage("{\"cmd\":\"segs\",\"on\":false}") } }
+        endScan()
         if (heldBySmartDelay) sendCommand("{\"cmd\":\"resume\"}")
         heldBySmartDelay = false
         sound?.close()
@@ -1284,6 +1399,7 @@ class BrowserActivity : ComponentActivity() {
             .setSingleChoiceItems(labels, values.indexOf(smartDelaySec).coerceAtLeast(0)) { d, which ->
                 smartDelaySec = values[which]
                 needFullBuffer = smartDelaySec > 0 && ahead != null
+                resetSmartDelay()
                 d.dismiss()
                 updateControls()
             }
@@ -1328,6 +1444,13 @@ class BrowserActivity : ComponentActivity() {
         private const val HOLD_SETTLE_MS = 1500L
         /** No sound from the page this long after asking, while the video plays: hear it as it plays. */
         private const val NO_SOUND_MS = 8000L
+        /** Smart Delay plays on when waiting brings nothing new for this long. */
+        private const val NO_PROGRESS_MS = 45_000L
+        /** The site's player has stopped loading when nothing new arrived for this long. */
+        private const val SCAN_IDLE_MS = 2000L
+        /** How long a scan step is given to land and load before it counts as bringing nothing. */
+        private const val SCAN_STEP_WAIT_MS = 5000L
+        private const val MAX_SCAN_STEPS = 6
         private const val ASSET_HOST = "appassets.androidplatform.net"
         private const val DIRECTORY_PATH = "/browser/sites.html"
         /** Start page of every new tab: the foreign video site directory (assets/browser/sites.html). */

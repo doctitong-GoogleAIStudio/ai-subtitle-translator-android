@@ -131,12 +131,21 @@ class SoundAhead(
     @Volatile private var movedAt = 0L
 
     /**
+     * The page is moving the waiting video forward so its player loads more (Smart Delay's scan
+     * ahead): pauses in the loading are then not the end of what the player will load.
+     */
+    @Volatile var scanning = false
+
+    /** Milliseconds since the last sound arrived, or 0 before any. */
+    fun idleMs(): Long = store.lastAddedAt.let { if (it > 0) SystemClock.elapsedRealtime() - it else 0L }
+
+    /**
      * The player has filled its buffer: nothing new for [STALL_MS] while the video stands
      * still (held or paused). While it plays, the player loads on piece by piece.
      */
     private fun stalled(): Boolean {
         val now = SystemClock.elapsedRealtime()
-        return store.lastAddedAt > 0 && now - store.lastAddedAt > STALL_MS && now - movedAt > STILL_MS
+        return !scanning && store.lastAddedAt > 0 && now - store.lastAddedAt > STALL_MS && now - movedAt > STILL_MS
     }
 
     override fun textAt(t: Double): Pair<String, Boolean> {

@@ -1,4 +1,4 @@
-# Permissions, data handling and Play notes (version 1.3.0)
+# Permissions, data handling and Play notes (version 1.3.1)
 
 The movie player needs no permissions. The built-in browser needs the internet. Each
 Live Floating Subtitles permission is asked for only when the user taps
@@ -34,6 +34,11 @@ service, no microphone and no screen capture, and it stops when the browser scre
   of sound per player, and the app about four minutes, both only around the playhead
   (earlier sound is dropped). All of it is gone when subtitles stop or the page closes.
   Nothing is written to storage.
+- **Scan ahead (Smart Delay, 1.3.1).** While the video waits for a delay longer than the
+  site's player loads, the page may move the same, visible video forward and back (muted,
+  picture hidden) so that the site's own player loads more of the video the viewer is about
+  to watch. The app fetches and stores nothing itself; the sound is handled exactly as
+  above. Protected (DRM) video and live streams are not scanned.
 - **Video site directory (1.3.0).** The browser's start page is bundled with the app and
   shown without any network request. It lists sites only; nothing is loaded from a site
   until the user taps it.

@@ -34,7 +34,7 @@ One phone is enough to start. Each extra phone class makes the defaults safer.
 - **Install the APK:**
 
   ```bash
-  adb install -r "AI-Subtitle-Translator-universal v1.3.0.apk"
+  adb install -r "AI-Subtitle-Translator-universal v1.3.1.apk"
   ```
 
 - **In the app:**
@@ -163,7 +163,7 @@ can be applied without arguing over noise.
 - Copy the `results.md` table into the README's results section, with the phone and SoC
   name, then apply the decisions above as one change with its unit tests.
 
-## Built-in browser and floating subtitles (1.2.0, 1.3.0)
+## Built-in browser and floating subtitles (1.2.0 to 1.3.1)
 
 No PC or script needed: these are checks by hand on the phone. Send the notes and the
 copied session reports. Use a video you are allowed to watch. Never use the app to get
@@ -189,7 +189,11 @@ around DRM or a site's rules.
      the video waits, and whether it then plays with subtitles on time (with the words, not
      after them);
    - whether the video stops again later (the phone fell behind) and how often;
-   - with 60 s, whether it says "the site loads only N s ahead", and what N is;
+   - with 60 s, whether the video briefly goes dark while "loading more sound ahead"
+     (Scan ahead, 1.3.1), then plays from where it waited, and how long the wait was in all;
+   - whether "Preparing English subtitles… N of 60 s" is shown on the video in full screen;
+   - press Play once while it waits: it should play on without stopping again until you
+     jump elsewhere in the video;
    - whether the phone gets warm, and whether "Live subtitles are used" appeared instead
      (that site's sound could not be read ahead).
 6. Try one big streaming site with DRM. It is expected to refuse the video's sound. Note
